@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { doc, getDoc, getFirestore, setDoc } from "firebase/firestore";
@@ -63,6 +63,7 @@ type AppData = {
     mode: EduMode;
     absenceLimit: number;
     fallbackFirstClass: string;
+    prepLeadMinutes: number;
     weekMode: WeekMode;
     anchorDate: string;
   };
@@ -236,11 +237,201 @@ const RECIPE_BOOK = {
       "Хороший плотный завтрак без сложной готовки.",
     ],
   },
-  curdHoney: {
-    title: "Творог с медом и бананом",
+  curdBanana: {
+    title: "Творог с бананом",
+    budget: "85-130 ₽",
+    ingredients: ["Творог 180-200 г", "1 банан"],
+    steps: ["В миску выложи творог.", "Нарежь банан кружками и смешай.", "Если сухо, добавь 1-2 ложки кефира."],
+  },
+  overnightOats: {
+    title: "Овсянка на ночь в контейнере",
+    budget: "55-95 ₽",
+    ingredients: ["Овсянка 70-90 г", "Молоко 200-250 мл", "Банан", "Арахис 20 г"],
+    steps: [
+      "С вечера засыпь овсянку в контейнер и залей молоком.",
+      "Добавь нарезанный банан и арахис, закрой крышкой.",
+      "Утром просто достань из холодильника и ешь без готовки.",
+    ],
+  },
+  peanutSandwiches: {
+    title: "Сэндвичи с арахисовой пастой и бананом",
+    budget: "70-130 ₽",
+    ingredients: ["Хлеб 4 ломтика", "Арахисовая паста", "1 банан"],
+    steps: [
+      "Намажь пасту на хлеб.",
+      "Добавь кружки банана и закрой сэндвич.",
+      "Убери в контейнер: удобно взять в дорогу и на перерыв.",
+    ],
+  },
+  eggsBreadCheese: {
+    title: "Яйца, хлеб и сыр",
+    budget: "75-120 ₽",
+    ingredients: ["3 яйца", "Хлеб", "Сыр 30-40 г", "Соль"],
+    steps: [
+      "Свари яйца заранее на 2 дня вперед (8-9 минут).",
+      "Утром только собери в контейнер яйца, хлеб и сыр.",
+      "Можно есть без разогрева, удобно в универе.",
+    ],
+  },
+  omeletCheese: {
+    title: "Омлет с сыром и хлебом",
+    budget: "80-130 ₽",
+    ingredients: ["3 яйца", "Сыр 40-50 г", "Хлеб 2 ломтика", "Соль"],
+    steps: [
+      "Взбей яйца с щепоткой соли.",
+      "Вылей на разогретую сковороду, добавь сыр и накрой крышкой на 4-5 минут.",
+      "Подавай с хлебом. Готово быстро и сытно.",
+    ],
+  },
+  friedPotatoEgg: {
+    title: "Жареная картошка с яйцами",
+    budget: "90-150 ₽",
+    ingredients: ["Картофель 3-4 шт", "2 яйца", "Масло", "Соль"],
+    steps: [
+      "Нарежь картошку тонко и обжарь 10-12 минут до мягкости.",
+      "Добавь яйца, перемешай и жарь еще 2-3 минуты.",
+      "Простое калорийное блюдо на набор.",
+    ],
+  },
+  riceMince: {
+    title: "Рис с фаршем",
+    budget: "120-190 ₽",
+    ingredients: ["Рис 100-120 г", "Фарш 180-220 г", "Лук", "Соль, перец"],
+    steps: [
+      "Отвари рис 12-15 минут.",
+      "Фарш с луком обжарь 8-10 минут.",
+      "Смешай рис с фаршем и прогрей 2 минуты.",
+    ],
+  },
+  buckwheatMince: {
+    title: "Гречка с фаршем",
+    budget: "120-190 ₽",
+    ingredients: ["Гречка 100-120 г", "Фарш 180-220 г", "Лук", "Соль"],
+    steps: [
+      "Гречку отвари 15-18 минут.",
+      "Фарш обжарь с луком 8-10 минут.",
+      "Смешай, посоли, прогрей 2 минуты.",
+    ],
+  },
+  pastaStew: {
+    title: "Макароны с тушенкой",
+    budget: "100-170 ₽",
+    ingredients: ["Макароны 100-120 г", "Тушенка 1/2 банки", "Соль"],
+    steps: [
+      "Отвари макароны до готовности.",
+      "Тушенку прогрей на сковороде 3-4 минуты.",
+      "Смешай с макаронами и прогрей 1 минуту.",
+    ],
+  },
+  chickenPotato: {
+    title: "Курица с картошкой на сковороде",
+    budget: "130-210 ₽",
+    ingredients: ["Курица 180-220 г", "Картофель 3-4 шт", "Соль, специи"],
+    steps: [
+      "Курицу обжарь 6-7 минут.",
+      "Добавь картошку кубиком, накрой крышкой и готовь 12-15 минут.",
+      "Перемешай и доведи до готовности.",
+    ],
+  },
+  pastaCreamCheese: {
+    title: "Макароны в сырном соусе",
+    budget: "120-180 ₽",
+    ingredients: ["Макароны 120 г", "Сыр 70-90 г", "Молоко 120 мл", "Соль"],
+    steps: [
+      "Отвари макароны.",
+      "В ковшике прогрей молоко, добавь тертый сыр.",
+      "Смешай соус с макаронами и подержи 1 минуту на огне.",
+    ],
+  },
+  riceChickenVeg: {
+    title: "Рис с курицей и овощной смесью",
+    budget: "130-210 ₽",
+    ingredients: ["Рис 100-120 г", "Курица 180 г", "Замороженные овощи 120 г", "Соль"],
+    steps: [
+      "Рис отвари отдельно.",
+      "Курицу обжарь 7-8 минут.",
+      "Добавь овощи на 5 минут, затем смешай с рисом.",
+    ],
+  },
+  lavashChickenCheese: {
+    title: "Лаваш с курицей и сыром",
+    budget: "110-170 ₽",
+    ingredients: ["Лаваш 1 шт", "Курица 120-150 г", "Сыр 40 г"],
+    steps: [
+      "Курицу быстро обжарь на сильном огне 6-7 минут.",
+      "Выложи в лаваш, добавь сыр и сверни.",
+      "Прогрей на сухой сковороде 1-2 минуты.",
+    ],
+  },
+  curdJam: {
+    title: "Творог с бананом и ложкой варенья",
     budget: "90-140 ₽",
-    ingredients: ["Творог 180-200 г", "Мед 1 ч.л.", "1 банан"],
-    steps: ["Смешай творог с медом.", "Добавь банан кружками.", "Ешь перед сном или в длинный перерыв."],
+    ingredients: ["Творог 180-200 г", "Банан", "1 ложка варенья"],
+    steps: [
+      "Смешай творог с бананом.",
+      "Добавь ложку варенья для калорий и вкуса.",
+      "Готово без готовки.",
+    ],
+  },
+  yogurtOatsBanana: {
+    title: "Йогурт, овсянка и банан",
+    budget: "70-120 ₽",
+    ingredients: ["Питьевой йогурт 250-300 мл", "Овсянка 40 г", "Банан"],
+    steps: [
+      "Смешай овсянку и йогурт в миске.",
+      "Добавь банан кусочками.",
+      "Подходит как быстрый калорийный прием.",
+    ],
+  },
+  proteinMilkBanana: {
+    title: "Молоко, банан и протеиновый батончик",
+    budget: "110-170 ₽",
+    ingredients: ["Молоко 400-500 мл", "Банан", "Протеиновый батончик"],
+    steps: [
+      "Купи по пути в магазине рядом с учебой.",
+      "Съешь в перерыв между занятиями.",
+      "Без готовки, но с нормальными калориями.",
+    ],
+  },
+  cheeseBunKefir: {
+    title: "Булка с сыром и кефир",
+    budget: "80-130 ₽",
+    ingredients: ["Булка", "Сыр 40-50 г", "Кефир 0.5 л"],
+    steps: [
+      "Собери булку с сыром.",
+      "Кефир выпей в длинный перерыв.",
+      "Простой бюджетный вариант без контейнеров.",
+    ],
+  },
+  shawarmaPlate: {
+    title: "Шаурма-тарелка (домашняя быстрая)",
+    budget: "130-220 ₽",
+    ingredients: ["Курица 150-180 г", "Лаваш", "Огурец или помидор", "Сметана"],
+    steps: [
+      "Курицу обжарь с солью и специями 8 минут.",
+      "Нарежь овощи и смешай со сметаной.",
+      "Подавай на тарелке с кусочками лаваша.",
+    ],
+  },
+  riceOmeletSausage: {
+    title: "Рис, омлет и колбаса",
+    budget: "110-170 ₽",
+    ingredients: ["Рис 100 г", "2 яйца", "Колбаса 80-100 г", "Соль"],
+    steps: [
+      "Отвари рис.",
+      "Сделай омлет из 2 яиц и нарежь полосками.",
+      "Обжарь колбасу, смешай с рисом и омлетом.",
+    ],
+  },
+  eggSandwichHot: {
+    title: "Горячие сэндвичи с яйцом и сыром",
+    budget: "80-130 ₽",
+    ingredients: ["Хлеб 4 ломтика", "2 яйца", "Сыр 40 г"],
+    steps: [
+      "Яйца пожарь как скрэмбл 2-3 минуты.",
+      "Собери сэндвичи с сыром.",
+      "Прогрей на сковороде 1-2 минуты.",
+    ],
   },
 } as const satisfies Record<string, MealRecipe>;
 
@@ -254,6 +445,10 @@ type MealPlanEntry = {
   recipeKey: RecipeKey;
 };
 
+function clampMinutes(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 const REWARDS = {
   classVisited: 10,
   safeDeposit: 50,
@@ -263,13 +458,15 @@ const REWARDS = {
 };
 
 const FIREBASE_CONFIG = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? "",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? "",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? "",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? "",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "AIzaSyBUAhtj8iVzXPGlYCuYQe3AJotYvhp0Ql8",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? "routinemyhelpbot.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? "routinemyhelpbot",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? "routinemyhelpbot.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "834116069999",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? "1:834116069999:web:346f603346e3830c653b9a",
 };
+
+const TELEGRAM_BOT_TOKEN = import.meta.env.VITE_TELEGRAM_BOT_TOKEN ?? "";
 
 const FIREBASE_ENABLED = Object.values(FIREBASE_CONFIG).every(Boolean);
 const db = FIREBASE_ENABLED ? getFirestore(getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG)) : null;
@@ -280,9 +477,11 @@ const TIMELINE_STYLE: Record<TimelineType, string> = {
   freelance: "timeline-freelance",
 };
 
-const MAIN_RECIPES_WEEK1: RecipeKey[] = ["plov", "pastaSausageEgg", "buckwheatChicken", "pastaMince", "potatoStew", "pastaChicken", "riceEggChicken"];
-const MAIN_RECIPES_WEEK2: RecipeKey[] = ["pastaCheese", "plov", "riceEggChicken", "pastaMince", "buckwheatChicken", "pastaSausage", "potatoStew"];
-const SNACK_RECIPES: RecipeKey[] = ["barEnergy", "bananaPeanut"];
+const BREAKFAST_RECIPES: RecipeKey[] = ["omeletCheese", "oatmealMass", "eggSandwichHot", "pastaEgg", "teaSandwich", "curdBanana", "friedPotatoEgg", "yogurtOatsBanana"];
+const MAIN_RECIPES_WEEK1: RecipeKey[] = ["plov", "pastaSausageEgg", "buckwheatChicken", "pastaMince", "potatoStew", "pastaChicken", "riceEggChicken", "riceMince", "chickenPotato", "pastaStew", "riceChickenVeg", "shawarmaPlate"];
+const MAIN_RECIPES_WEEK2: RecipeKey[] = ["pastaCheese", "plov", "riceEggChicken", "pastaMince", "buckwheatChicken", "pastaSausage", "potatoStew", "buckwheatMince", "pastaCreamCheese", "riceOmeletSausage", "lavashChickenCheese", "chickenPotato"];
+const BREAK_SNACK_RECIPES: RecipeKey[] = ["barEnergy", "bananaPeanut", "proteinMilkBanana", "cheeseBunKefir", "curdJam", "kefirBanana"];
+const LATE_RECIPES: RecipeKey[] = ["kefirBanana", "curdBanana", "curdJam", "yogurtOatsBanana"];
 
 function lesson(weekType: WeekType, day: number, start: string, end: string, title: string, type: LessonType = "pair", mode: EduMode = "university"): ScheduleItem {
   return { id: crypto.randomUUID(), mode, weekType, day, start, end, title, type, skipped: false };
@@ -406,26 +605,60 @@ function getAutoWeekType(now: Date, anchorDate: string) {
   return Math.abs(weekShift) % 2 === 0 ? "week1" : "week2";
 }
 
-function getMainRecipe(day: number, weekType: WeekType): RecipeKey {
-  const source = weekType === "week1" ? MAIN_RECIPES_WEEK1 : MAIN_RECIPES_WEEK2;
-  return source[day % source.length];
+function getRotatedRecipe(source: RecipeKey[], index: number): RecipeKey {
+  return source[((index % source.length) + source.length) % source.length];
 }
 
-function buildMealPlan(dayLessons: ScheduleItem[], sleepTime: string, day: number, weekType: WeekType): MealPlanEntry[] {
+function toggleWeekType(weekType: WeekType): WeekType {
+  return weekType === "week1" ? "week2" : "week1";
+}
+
+function getNextDayFirstClassTime(schedule: ScheduleItem[], mode: EduMode, day: number, weekType: WeekType) {
+  for (let shift = 1; shift <= 7; shift += 1) {
+    const dayIndex = (day + shift) % 7;
+    const weekShift = Math.floor((day + shift) / 7);
+    const weekByShift = weekShift % 2 === 0 ? weekType : toggleWeekType(weekType);
+    const entries = schedule
+      .filter((item) => {
+        if (item.mode !== mode || item.day !== dayIndex) return false;
+        if (mode === "school") return true;
+        return item.weekType === weekByShift;
+      })
+      .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+
+    if (entries.length > 0) {
+      return entries[0].start;
+    }
+  }
+  return null;
+}
+
+function getBedtimeFromNextClass(nextClassStart: string | null, prepLeadMinutes: number) {
+  if (!nextClassStart) return "23:30";
+
+  const wakeMinutes = timeToMinutes(nextClassStart) - prepLeadMinutes;
+  let sleepMinutes = wakeMinutes - 8 * 60;
+
+  if (sleepMinutes < 20 * 60) sleepMinutes += 1440;
+  sleepMinutes = Math.max(21 * 60, Math.min(24 * 60 + 30, sleepMinutes));
+  return minutesToTime(sleepMinutes);
+}
+
+function buildMealPlan(dayLessons: ScheduleItem[], day: number, weekType: WeekType, bedtime: string, prepLeadMinutes: number): MealPlanEntry[] {
   const sorted = dayLessons.slice().sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
   const firstClass = sorted[0]?.start;
+  const wakeBySchedule = firstClass ? subtractMinutes(firstClass, prepLeadMinutes) : null;
+  const breakfastRecipe = getRotatedRecipe(BREAKFAST_RECIPES, day + (weekType === "week2" ? 2 : 0));
   const breakfastTime = firstClass
-    ? minutesToTime(Math.max(timeToMinutes(subtractMinutes(firstClass, 60)), timeToMinutes("06:30")))
-    : "08:30";
-
-  const breakfastRecipe: RecipeKey = day % 2 === 0 ? "teaSandwich" : "oatmealMass";
+    ? minutesToTime(clampMinutes(timeToMinutes(wakeBySchedule ?? "07:00") + 8, timeToMinutes("05:40"), timeToMinutes("10:40")))
+    : "09:00";
 
   const plan: MealPlanEntry[] = [
     {
       id: crypto.randomUUID(),
       time: breakfastTime,
       title: RECIPE_BOOK[breakfastRecipe].title,
-      note: "Перед учебой",
+      note: firstClass ? "Быстрый прием дома перед началом дня" : "Плотный домашний завтрак",
       recipeKey: breakfastRecipe,
     },
   ];
@@ -435,47 +668,70 @@ function buildMealPlan(dayLessons: ScheduleItem[], sleepTime: string, day: numbe
     const current = sorted[i];
     const next = sorted[i + 1];
     const gap = timeToMinutes(next.start) - timeToMinutes(current.end);
-    if (gap >= 25) {
-      const snackKey = SNACK_RECIPES[snackIndex % SNACK_RECIPES.length];
+    if (gap >= 30) {
+      const snackKey = getRotatedRecipe(BREAK_SNACK_RECIPES, snackIndex + day);
       snackIndex += 1;
       plan.push({
         id: crypto.randomUUID(),
         time: addMinutes(current.end, 10),
         title: RECIPE_BOOK[snackKey].title,
-        note: "Перерыв между парами",
+        note: "Перерыв между занятиями: берется рядом с учебой, без готовки",
         recipeKey: snackKey,
       });
     }
   }
 
-  if (!plan.some((entry) => entry.recipeKey === "barEnergy" || entry.recipeKey === "bananaPeanut")) {
-    const defaultSnack: RecipeKey = day % 2 === 0 ? "bananaPeanut" : "barEnergy";
+  if (sorted.length > 0 && !plan.some((entry) => BREAK_SNACK_RECIPES.includes(entry.recipeKey))) {
+    const defaultSnack = getRotatedRecipe(BREAK_SNACK_RECIPES, day + 3);
     plan.push({
       id: crypto.randomUUID(),
-      time: "12:30",
+      time: firstClass ? addMinutes(firstClass, 170) : "11:30",
       title: RECIPE_BOOK[defaultSnack].title,
-      note: "Обязательный перекус",
+      note: "Дополнительный калорийный прием в середине дня",
       recipeKey: defaultSnack,
     });
   }
 
-  const mainRecipe = getMainRecipe(day, weekType);
-  const lastEnd = sorted[sorted.length - 1]?.end ?? "16:00";
+  const mainRecipe = getRotatedRecipe(weekType === "week1" ? MAIN_RECIPES_WEEK1 : MAIN_RECIPES_WEEK2, day + sorted.length);
+  const lastEnd = sorted[sorted.length - 1]?.end ?? "17:30";
   plan.push({
     id: crypto.randomUUID(),
-    time: addMinutes(lastEnd, 70),
+    time: firstClass ? addMinutes(lastEnd, 85) : "18:30",
     title: RECIPE_BOOK[mainRecipe].title,
-    note: "Основной прием пищи",
+    note: "Основной домашний прием пищи на набор массы",
     recipeKey: mainRecipe,
   });
 
+  const lateMealTime = minutesToTime(clampMinutes(timeToMinutes(subtractMinutes(bedtime, 75)), timeToMinutes("20:20"), timeToMinutes("23:30")));
+  const lateRecipe = getRotatedRecipe(LATE_RECIPES, day + (weekType === "week2" ? 1 : 0));
   plan.push({
     id: crypto.randomUUID(),
-    time: subtractMinutes(sleepTime, 60),
-    title: day % 2 === 0 ? RECIPE_BOOK.kefirBanana.title : RECIPE_BOOK.curdHoney.title,
-    note: "Легкий прием перед сном",
-    recipeKey: day % 2 === 0 ? "kefirBanana" : "curdHoney",
+    time: lateMealTime,
+    title: RECIPE_BOOK[lateRecipe].title,
+    note: "Спокойный прием перед сном для добора калорий",
+    recipeKey: lateRecipe,
   });
+
+  if (!firstClass) {
+    const homeLunch = getRotatedRecipe(MAIN_RECIPES_WEEK1, day + 4);
+    const homeSnack = getRotatedRecipe(BREAK_SNACK_RECIPES, day + 2);
+    plan.unshift(
+      {
+        id: crypto.randomUUID(),
+        time: "13:20",
+        title: RECIPE_BOOK[homeLunch].title,
+        note: "Обед дома",
+        recipeKey: homeLunch,
+      },
+      {
+        id: crypto.randomUUID(),
+        time: "16:40",
+        title: RECIPE_BOOK[homeSnack].title,
+        note: "Перекус между делами",
+        recipeKey: homeSnack,
+      },
+    );
+  }
 
   return plan.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 }
@@ -497,6 +753,7 @@ function createDefaultState(): AppData {
       mode: "university",
       absenceLimit: 20,
       fallbackFirstClass: "08:00",
+      prepLeadMinutes: 120,
       weekMode: "auto",
       anchorDate: "2026-04-05",
     },
@@ -586,6 +843,8 @@ export default function App() {
   const [vaultInput, setVaultInput] = useState(1000);
   const [paymentWindow, setPaymentWindow] = useState<{ amount: number; expiresAt: number } | null>(null);
   const [activeRecipe, setActiveRecipe] = useState<RecipeKey | null>(null);
+  const [botStatus, setBotStatus] = useState("");
+  const alarmTelegramSentRef = useRef(false);
   const [selectedDay, setSelectedDay] = useState(() => chelyabinskWeekday());
   const [selectedStudyDay, setSelectedStudyDay] = useState(() => chelyabinskWeekday());
   const [studyEditorOpen, setStudyEditorOpen] = useState(false);
@@ -605,7 +864,6 @@ export default function App() {
   const autoWeekType = getAutoWeekType(nowChelyab, data.study.anchorDate);
   const activeWeekType: WeekType = data.study.weekMode === "auto" ? autoWeekType : data.study.weekMode;
   const currentTime = tzTime(tick);
-  const todayIndex = chelyabinskWeekday(nowChelyab);
 
   const scopedSchedule = useMemo(
     () =>
@@ -619,10 +877,6 @@ export default function App() {
     [data.schedule, data.study.mode, activeWeekType],
   );
 
-  const todaySchedule = useMemo(
-    () => scopedSchedule.filter((item) => item.day === todayIndex).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
-    [scopedSchedule, todayIndex],
-  );
   const selectedDaySchedule = useMemo(
     () => scopedSchedule.filter((item) => item.day === selectedDay).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
     [scopedSchedule, selectedDay],
@@ -632,7 +886,13 @@ export default function App() {
     [scopedSchedule, selectedStudyDay],
   );
 
-  const firstClassTime = todaySchedule[0]?.start ?? "";
+  const selectedDayFirstClass = selectedDaySchedule[0]?.start ?? null;
+  const selectedDayWakeTime = selectedDayFirstClass ? subtractMinutes(selectedDayFirstClass, data.study.prepLeadMinutes) : null;
+  const selectedDayNextClass = useMemo(
+    () => getNextDayFirstClassTime(data.schedule, data.study.mode, selectedDay, activeWeekType),
+    [data.schedule, data.study.mode, selectedDay, activeWeekType],
+  );
+  const selectedDayBedtime = useMemo(() => getBedtimeFromNextClass(selectedDayNextClass, data.study.prepLeadMinutes), [selectedDayNextClass, data.study.prepLeadMinutes]);
 
   const nextClassInfo = useMemo(() => {
     const nowMinutes = timeToMinutes(currentTime);
@@ -672,12 +932,15 @@ export default function App() {
     return null;
   }, [data.schedule, data.study.mode, data.study.weekMode, data.study.anchorDate, currentTime, nowChelyab]);
 
-  const wakeTime = nextClassInfo ? subtractMinutes(nextClassInfo.start, 100) : data.alarm.time;
+  const wakeTime = nextClassInfo ? subtractMinutes(nextClassInfo.start, data.study.prepLeadMinutes) : data.alarm.time;
   const sleepTime = subtractMinutes(wakeTime, 8 * 60);
   const shouldSleep = Boolean(nextClassInfo) && timeToMinutes(currentTime) >= timeToMinutes(sleepTime);
   const alarmTriggered = data.alarm.enabled && timeToMinutes(currentTime) >= timeToMinutes(data.alarm.time) && !data.alarm.awakeConfirmedAt;
 
-  const mealPlan = useMemo(() => buildMealPlan(selectedDaySchedule, sleepTime, selectedDay, activeWeekType), [selectedDaySchedule, sleepTime, selectedDay, activeWeekType]);
+  const mealPlan = useMemo(
+    () => buildMealPlan(selectedDaySchedule, selectedDay, activeWeekType, selectedDayBedtime, data.study.prepLeadMinutes),
+    [selectedDaySchedule, selectedDay, activeWeekType, selectedDayBedtime, data.study.prepLeadMinutes],
+  );
 
   const paymentMs = paymentWindow ? Math.max(0, paymentWindow.expiresAt - tick.getTime()) : 0;
   const paymentMinutes = Math.floor(paymentMs / 60000);
@@ -816,6 +1079,66 @@ export default function App() {
     });
   }, [data.alarm.autoFromSchedule, data.alarm.time, nextClassInfo, wakeTime]);
 
+  const sendTelegramAlarm = async (kind: "test" | "auto") => {
+    const chatId = identity.telegramId;
+    if (!chatId) {
+      setBotStatus("Telegram user не определен. Открой приложение в Telegram WebApp.");
+      return false;
+    }
+
+    if (!TELEGRAM_BOT_TOKEN) {
+      setBotStatus("Не задан VITE_TELEGRAM_BOT_TOKEN.");
+      return false;
+    }
+
+    const textLines = kind === "test"
+      ? [
+          "[TEST] Будильник подключен.",
+          `Профиль: ${identity.telegramUsername || `id:${chatId}`}`,
+          `Время (Челябинск): ${currentTime}`,
+        ]
+      : [
+          "Подъем. Время вставать.",
+          `Будильник: ${data.alarm.time}`,
+          nextClassInfo ? `Ближайшее занятие: ${DAYS_FULL[nextClassInfo.dayIndex]} ${nextClassInfo.start}` : "",
+        ].filter(Boolean);
+
+    try {
+      setBotStatus(kind === "test" ? "Отправляю тест в Telegram..." : "Отправляю сигнал будильника...");
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: textLines.join("\n"),
+          disable_web_page_preview: true,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) {
+        setBotStatus("Ошибка Telegram API. Проверь токен, доступ и чат с ботом.");
+        return false;
+      }
+
+      setBotStatus(kind === "test" ? "Тест отправлен в Telegram." : "Сигнал будильника отправлен в Telegram.");
+      return true;
+    } catch {
+      setBotStatus("Не удалось отправить запрос к Telegram API.");
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!alarmTriggered) {
+      alarmTelegramSentRef.current = false;
+      return;
+    }
+    if (alarmTelegramSentRef.current) return;
+    alarmTelegramSentRef.current = true;
+    void sendTelegramAlarm("auto");
+  }, [alarmTriggered]);
+
   const addXP = (amount: number) => {
     setData((prev) => ({ ...prev, xp: { ...prev.xp, points: prev.xp.points + amount } }));
   };
@@ -947,15 +1270,19 @@ export default function App() {
   if (!loaded || !splashDone) {
     return (
       <div className="app-shell app-loader">
-        <div className="loader-orbit" aria-hidden="true" />
-        <div className="loader-crane" aria-hidden="true">
-          <div className="loader-rail" />
-          <div className="loader-cabin" />
-          <div className="loader-line" />
-          <div className="loader-hook" />
+        <div className="loader-stage" aria-hidden="true">
+          <div className="loader-orbit" />
+          <div className="loader-ring" />
+          <div className="loader-scan" />
+          <div className="loader-crane">
+            <div className="loader-rail" />
+            <div className="loader-cabin" />
+            <div className="loader-line" />
+            <div className="loader-hook" />
+          </div>
         </div>
         <motion.p className="loader-text" initial={{ opacity: 0.45 }} animate={{ opacity: 1 }} transition={{ repeat: Infinity, repeatType: "reverse", duration: 1.1 }}>
-          Сборка интерфейса и синхронизация
+          Поднимаем систему и синхронизируем данные
         </motion.p>
       </div>
     );
@@ -966,6 +1293,8 @@ export default function App() {
       <motion.div className="ambient ambient-left" animate={{ y: [-26, 14, -26], opacity: [0.25, 0.48, 0.25] }} transition={{ repeat: Infinity, duration: 12, ease: "easeInOut" }} />
       <motion.div className="ambient ambient-right" animate={{ y: [24, -14, 24], opacity: [0.2, 0.44, 0.2] }} transition={{ repeat: Infinity, duration: 10, ease: "easeInOut" }} />
       <motion.div className="ambient ambient-mid" animate={{ scale: [1, 1.08, 1], opacity: [0.22, 0.4, 0.22] }} transition={{ repeat: Infinity, duration: 8.5, ease: "easeInOut" }} />
+      <motion.div className="aurora-ribbon aurora-top" animate={{ x: ["-8%", "6%", "-8%"], opacity: [0.25, 0.5, 0.25] }} transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }} />
+      <motion.div className="aurora-ribbon aurora-bottom" animate={{ x: ["10%", "-8%", "10%"], opacity: [0.16, 0.38, 0.16] }} transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }} />
       <motion.div className="wordmark-ghost" animate={{ opacity: [0.1, 0.2, 0.08, 0.18, 0.1] }} transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}>
         ROUTINE
       </motion.div>
@@ -1033,9 +1362,11 @@ export default function App() {
           {tab === "food" && (
             <motion.section key="food" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
                <h2 className="feature-title">Питание на день</h2>
-               <p className="feature-text">План строится по расписанию выбранного дня. Все блюда простые и бюджетные для набора массы.</p>
+               <p className="feature-text">План строится по расписанию выбранного дня и ориентирован на набор массы из доступных блюд.</p>
 
-                <div className="mt-4 text-sm text-black/65">Сегодня: {DAYS_FULL[todayIndex]}, {firstClassTime ? `первая пара ${firstClassTime}` : "пар нет"}, ориентир отбоя {sleepTime}.</div>
+                <div className="mt-4 text-sm text-black/65">
+                  {DAYS_FULL[selectedDay]}: {selectedDayFirstClass ? `первое занятие ${selectedDayFirstClass}, подъем около ${selectedDayWakeTime}` : "занятий нет"}. Сон под следующий учебный день: отбой около {selectedDayBedtime}.
+                </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {DAYS_SHORT.map((day, idx) => (
                   <button key={day} className={`secondary-btn ${selectedDay === idx ? "active" : ""}`} onClick={() => setSelectedDay(idx)}>
@@ -1254,6 +1585,21 @@ export default function App() {
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <button className="primary-btn" onClick={() => addXP(REWARDS.sleepOnTime)}>Лег вовремя (+{REWARDS.sleepOnTime} XP)</button>
+                <select
+                  className="field w-[210px]"
+                  value={data.study.prepLeadMinutes}
+                  onChange={(e) =>
+                    setData((prev) => ({
+                      ...prev,
+                      study: { ...prev.study, prepLeadMinutes: Number(e.target.value) || 120 },
+                    }))
+                  }
+                >
+                  <option value={100}>Запас до занятия: 1ч 40м</option>
+                  <option value={110}>Запас до занятия: 1ч 50м</option>
+                  <option value={120}>Запас до занятия: 2ч 00м</option>
+                  <option value={130}>Запас до занятия: 2ч 10м</option>
+                </select>
                 <input
                   className="field w-[170px]"
                   type="time"
@@ -1286,6 +1632,10 @@ export default function App() {
               <p className="mt-2 text-sm text-black/60">Будильник: {data.alarm.time}. {nextClassInfo ? `Ориентир по расписанию: ${wakeTime}.` : "Добавь занятия, чтобы авторасчет был точнее."}</p>
 
               <p className="mt-3 text-sm text-black/60">Профиль: {identity.telegramUsername || identity.telegramId || "не определен"}. В Telegram WebApp пользователь определяется автоматически.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className="secondary-btn" onClick={() => void sendTelegramAlarm("test")}>Тест кнопки будильника в Telegram</button>
+              </div>
+              <p className="mt-2 text-sm text-black/60">{botStatus || "Подсказка: для теста задайте VITE_TELEGRAM_BOT_TOKEN и откройте WebApp внутри Telegram."}</p>
 
               {alarmTriggered && (
                 <motion.div className="alarm-overlay mt-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>

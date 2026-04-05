@@ -1,1711 +1,1728 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { getApp, getApps, initializeApp } from "firebase/app";
-import { doc, getDoc, getFirestore, setDoc } from "firebase/firestore";
-
-const TZ = "Asia/Yekaterinburg";
-const OZON_PHONE = "+79525081814";
-const DAYS_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"] as const;
-const DAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
-
-type TabKey = "vault" | "food" | "study" | "planner" | "sleep" | "xp";
-type TaskStatus = "todo" | "doing" | "done";
-type TaskType = "homework" | "freelance" | "plan";
-type TimelineType = "homework" | "rest" | "freelance";
-type EduMode = "university" | "school";
-type LessonType = "pair" | "lesson";
-type WeekType = "week1" | "week2";
-type WeekMode = "auto" | WeekType;
-
-type ScheduleItem = {
-  id: string;
-  mode: EduMode;
-  weekType: WeekType;
-  day: number;
-  start: string;
-  end: string;
-  title: string;
-  type: LessonType;
-  skipped: boolean;
-};
-
-type Task = {
-  id: string;
-  title: string;
-  type: TaskType;
-  status: TaskStatus;
-  weekKey: string;
-  locked: boolean;
-};
-
-type TimelineItem = {
-  id: string;
-  title: string;
-  type: TimelineType;
-  start: number;
-  end: number;
-  weekKey: string;
-  locked: boolean;
-};
-
-type AppData = {
-  profile: {
-    telegramId: string;
-    telegramUsername: string;
-    displayName: string;
-  };
-  vault: {
-    balance: number;
-    target: number;
-    lastPaidAt: string | null;
-  };
-  study: {
-    mode: EduMode;
-    absenceLimit: number;
-    fallbackFirstClass: string;
-    prepLeadMinutes: number;
-    weekMode: WeekMode;
-    anchorDate: string;
-  };
-  schedule: ScheduleItem[];
-  planning: {
-    activeWeekKey: string;
-  };
-  tasks: Task[];
-  timeline: TimelineItem[];
-  alarm: {
-    enabled: boolean;
-    time: string;
-    autoFromSchedule: boolean;
-    awakeConfirmedAt: string | null;
-  };
-  xp: {
-    points: number;
-    spent: number;
-    lastDailyClaim: string | null;
-  };
-};
-
-type Identity = {
-  docId: string;
-  displayName: string;
-  telegramUsername: string;
-  telegramId: string;
-  source: "local" | "telegram";
-};
-
-type MealRecipe = {
-  title: string;
-  budget: string;
-  ingredients: string[];
-  steps: string[];
-};
-
-const RECIPE_BOOK = {
-  teaSandwich: {
-    title: "Чай и бутерброды с сыром/колбасой",
-    budget: "60-110 ₽",
-    ingredients: ["Хлеб 2-4 ломтика", "Сыр", "Колбаса", "Чай"],
-    steps: [
-      "Собери 2 бутерброда с сыром и колбасой.",
-      "Обжарь на сухой сковороде по 1 минуте с каждой стороны или разогрей в микроволновке.",
-      "Завари чай, ешь за 30-60 минут до выхода.",
-    ],
-  },
-  barEnergy: {
-    title: "Протеиновый батончик и энергетик",
-    budget: "120-180 ₽",
-    ingredients: ["1 протеиновый батончик", "1 энергетик 0.25-0.45"],
-    steps: ["Держи запас в рюкзаке.", "Используй на коротком перерыве между парами."],
-  },
-  bananaPeanut: {
-    title: "Банан и арахис",
-    budget: "45-80 ₽",
-    ingredients: ["1-2 банана", "Пакет арахиса 40-60 г"],
-    steps: ["Быстрый перекус без готовки.", "Ешь в длинный перерыв, когда нет времени на столовую."],
-  },
-  plov: {
-    title: "Плов на сковороде",
-    budget: "130-220 ₽",
-    ingredients: ["Рис 120-150 г", "Курица или свинина 180-220 г", "Лук", "Морковь", "Соль, перец"],
-    steps: [
-      "Нарежь мясо, обжарь 7-8 минут.",
-      "Добавь лук и морковь, жарь еще 4 минуты.",
-      "Засыпь промытый рис, залей горячей водой на 1.5 см выше риса.",
-      "Туши под крышкой 18-20 минут на слабом огне.",
-    ],
-  },
-  pastaSausage: {
-    title: "Макароны с колбасой",
-    budget: "90-150 ₽",
-    ingredients: ["Макароны 100-120 г", "Колбаса 120 г", "Масло", "Соль"],
-    steps: [
-      "Отвари макароны 8-10 минут.",
-      "Колбасу нарежь и обжарь 2-3 минуты.",
-      "Смешай макароны с колбасой, посоли по вкусу.",
-    ],
-  },
-  pastaSausageEgg: {
-    title: "Макароны с колбасой и яйцами",
-    budget: "110-170 ₽",
-    ingredients: ["Макароны 100-120 г", "Колбаса 100-120 г", "2-3 яйца", "Соль"],
-    steps: [
-      "Отвари макароны.",
-      "Обжарь колбасу 2 минуты.",
-      "Влей яйца, размешай, затем добавь макароны и доведи 2-3 минуты.",
-    ],
-  },
-  pastaEgg: {
-    title: "Макароны с яйцами",
-    budget: "70-120 ₽",
-    ingredients: ["Макароны 100-120 г", "2-3 яйца", "Соль", "Чуть масла"],
-    steps: ["Отвари макароны.", "На сковороде сделай яичную смесь и вмешай макароны.", "Готово за 10-12 минут."],
-  },
-  pastaMince: {
-    title: "Макароны с фаршем",
-    budget: "120-200 ₽",
-    ingredients: ["Макароны 100-120 г", "Фарш 180-220 г", "Лук", "Соль, перец"],
-    steps: [
-      "Обжарь фарш с луком 8-10 минут, разминая комки.",
-      "Отвари макароны отдельно.",
-      "Смешай, прогрей 2 минуты.",
-    ],
-  },
-  pastaChicken: {
-    title: "Макароны с курицей",
-    budget: "120-190 ₽",
-    ingredients: ["Макароны 100-120 г", "Курица 180-220 г", "Соль", "Паприка по желанию"],
-    steps: [
-      "Нарежь курицу кусочками, обжарь 8 минут до готовности.",
-      "Отвари макароны.",
-      "Смешай макароны и курицу, прогрей 1-2 минуты.",
-    ],
-  },
-  pastaCheese: {
-    title: "Макароны с сыром",
-    budget: "90-160 ₽",
-    ingredients: ["Макароны 100-120 г", "Сыр 60-90 г", "Немного сливочного масла"],
-    steps: [
-      "Отвари макароны.",
-      "Добавь масло и тертый сыр в горячие макароны.",
-      "Перемешай до тягучей текстуры.",
-    ],
-  },
-  kefirBanana: {
-    title: "Кефир и банан перед сном",
-    budget: "50-90 ₽",
-    ingredients: ["Кефир 0.5 л", "1 банан"],
-    steps: ["Выпей кефир за 40-60 минут до сна.", "Банан добавь, если остался голод."],
-  },
-  buckwheatChicken: {
-    title: "Гречка с курицей",
-    budget: "110-180 ₽",
-    ingredients: ["Гречка 100-120 г", "Курица 180-220 г", "Лук", "Соль, перец"],
-    steps: [
-      "Гречку промой и отвари 15-18 минут.",
-      "Курицу нарежь и обжарь 8-10 минут.",
-      "Добавь лук, жарь еще 2 минуты и смешай с гречкой.",
-    ],
-  },
-  potatoStew: {
-    title: "Картошка с тушенкой",
-    budget: "120-190 ₽",
-    ingredients: ["Картофель 4-5 шт", "Тушенка 1/2-1 банка", "Лук", "Соль"],
-    steps: [
-      "Картошку нарежь кубиком и отвари 12-15 минут до мягкости.",
-      "На сковороде прогрей тушенку с луком 4-5 минут.",
-      "Смешай с картошкой и прогрей 2 минуты.",
-    ],
-  },
-  riceEggChicken: {
-    title: "Рис с курицей и яйцом",
-    budget: "120-200 ₽",
-    ingredients: ["Рис 100-120 г", "Курица 150-200 г", "2 яйца", "Соль"],
-    steps: [
-      "Рис отвари 12-15 минут.",
-      "Курицу обжарь до готовности 8-10 минут.",
-      "Добавь яйца, размешай и смешай с рисом.",
-    ],
-  },
-  oatmealMass: {
-    title: "Овсянка с бананом и арахисом",
-    budget: "55-90 ₽",
-    ingredients: ["Овсянка 70-90 г", "Молоко или вода", "1 банан", "Арахис 20-30 г"],
-    steps: [
-      "Залей овсянку молоком или водой и вари 4-6 минут.",
-      "Добавь нарезанный банан и арахис.",
-      "Хороший плотный завтрак без сложной готовки.",
-    ],
-  },
-  curdBanana: {
-    title: "Творог с бананом",
-    budget: "85-130 ₽",
-    ingredients: ["Творог 180-200 г", "1 банан"],
-    steps: ["В миску выложи творог.", "Нарежь банан кружками и смешай.", "Если сухо, добавь 1-2 ложки кефира."],
-  },
-  overnightOats: {
-    title: "Овсянка на ночь в контейнере",
-    budget: "55-95 ₽",
-    ingredients: ["Овсянка 70-90 г", "Молоко 200-250 мл", "Банан", "Арахис 20 г"],
-    steps: [
-      "С вечера засыпь овсянку в контейнер и залей молоком.",
-      "Добавь нарезанный банан и арахис, закрой крышкой.",
-      "Утром просто достань из холодильника и ешь без готовки.",
-    ],
-  },
-  peanutSandwiches: {
-    title: "Сэндвичи с арахисовой пастой и бананом",
-    budget: "70-130 ₽",
-    ingredients: ["Хлеб 4 ломтика", "Арахисовая паста", "1 банан"],
-    steps: [
-      "Намажь пасту на хлеб.",
-      "Добавь кружки банана и закрой сэндвич.",
-      "Убери в контейнер: удобно взять в дорогу и на перерыв.",
-    ],
-  },
-  eggsBreadCheese: {
-    title: "Яйца, хлеб и сыр",
-    budget: "75-120 ₽",
-    ingredients: ["3 яйца", "Хлеб", "Сыр 30-40 г", "Соль"],
-    steps: [
-      "Свари яйца заранее на 2 дня вперед (8-9 минут).",
-      "Утром только собери в контейнер яйца, хлеб и сыр.",
-      "Можно есть без разогрева, удобно в универе.",
-    ],
-  },
-  omeletCheese: {
-    title: "Омлет с сыром и хлебом",
-    budget: "80-130 ₽",
-    ingredients: ["3 яйца", "Сыр 40-50 г", "Хлеб 2 ломтика", "Соль"],
-    steps: [
-      "Взбей яйца с щепоткой соли.",
-      "Вылей на разогретую сковороду, добавь сыр и накрой крышкой на 4-5 минут.",
-      "Подавай с хлебом. Готово быстро и сытно.",
-    ],
-  },
-  friedPotatoEgg: {
-    title: "Жареная картошка с яйцами",
-    budget: "90-150 ₽",
-    ingredients: ["Картофель 3-4 шт", "2 яйца", "Масло", "Соль"],
-    steps: [
-      "Нарежь картошку тонко и обжарь 10-12 минут до мягкости.",
-      "Добавь яйца, перемешай и жарь еще 2-3 минуты.",
-      "Простое калорийное блюдо на набор.",
-    ],
-  },
-  riceMince: {
-    title: "Рис с фаршем",
-    budget: "120-190 ₽",
-    ingredients: ["Рис 100-120 г", "Фарш 180-220 г", "Лук", "Соль, перец"],
-    steps: [
-      "Отвари рис 12-15 минут.",
-      "Фарш с луком обжарь 8-10 минут.",
-      "Смешай рис с фаршем и прогрей 2 минуты.",
-    ],
-  },
-  buckwheatMince: {
-    title: "Гречка с фаршем",
-    budget: "120-190 ₽",
-    ingredients: ["Гречка 100-120 г", "Фарш 180-220 г", "Лук", "Соль"],
-    steps: [
-      "Гречку отвари 15-18 минут.",
-      "Фарш обжарь с луком 8-10 минут.",
-      "Смешай, посоли, прогрей 2 минуты.",
-    ],
-  },
-  pastaStew: {
-    title: "Макароны с тушенкой",
-    budget: "100-170 ₽",
-    ingredients: ["Макароны 100-120 г", "Тушенка 1/2 банки", "Соль"],
-    steps: [
-      "Отвари макароны до готовности.",
-      "Тушенку прогрей на сковороде 3-4 минуты.",
-      "Смешай с макаронами и прогрей 1 минуту.",
-    ],
-  },
-  chickenPotato: {
-    title: "Курица с картошкой на сковороде",
-    budget: "130-210 ₽",
-    ingredients: ["Курица 180-220 г", "Картофель 3-4 шт", "Соль, специи"],
-    steps: [
-      "Курицу обжарь 6-7 минут.",
-      "Добавь картошку кубиком, накрой крышкой и готовь 12-15 минут.",
-      "Перемешай и доведи до готовности.",
-    ],
-  },
-  pastaCreamCheese: {
-    title: "Макароны в сырном соусе",
-    budget: "120-180 ₽",
-    ingredients: ["Макароны 120 г", "Сыр 70-90 г", "Молоко 120 мл", "Соль"],
-    steps: [
-      "Отвари макароны.",
-      "В ковшике прогрей молоко, добавь тертый сыр.",
-      "Смешай соус с макаронами и подержи 1 минуту на огне.",
-    ],
-  },
-  riceChickenVeg: {
-    title: "Рис с курицей и овощной смесью",
-    budget: "130-210 ₽",
-    ingredients: ["Рис 100-120 г", "Курица 180 г", "Замороженные овощи 120 г", "Соль"],
-    steps: [
-      "Рис отвари отдельно.",
-      "Курицу обжарь 7-8 минут.",
-      "Добавь овощи на 5 минут, затем смешай с рисом.",
-    ],
-  },
-  lavashChickenCheese: {
-    title: "Лаваш с курицей и сыром",
-    budget: "110-170 ₽",
-    ingredients: ["Лаваш 1 шт", "Курица 120-150 г", "Сыр 40 г"],
-    steps: [
-      "Курицу быстро обжарь на сильном огне 6-7 минут.",
-      "Выложи в лаваш, добавь сыр и сверни.",
-      "Прогрей на сухой сковороде 1-2 минуты.",
-    ],
-  },
-  curdJam: {
-    title: "Творог с бананом и ложкой варенья",
-    budget: "90-140 ₽",
-    ingredients: ["Творог 180-200 г", "Банан", "1 ложка варенья"],
-    steps: [
-      "Смешай творог с бананом.",
-      "Добавь ложку варенья для калорий и вкуса.",
-      "Готово без готовки.",
-    ],
-  },
-  yogurtOatsBanana: {
-    title: "Йогурт, овсянка и банан",
-    budget: "70-120 ₽",
-    ingredients: ["Питьевой йогурт 250-300 мл", "Овсянка 40 г", "Банан"],
-    steps: [
-      "Смешай овсянку и йогурт в миске.",
-      "Добавь банан кусочками.",
-      "Подходит как быстрый калорийный прием.",
-    ],
-  },
-  proteinMilkBanana: {
-    title: "Молоко, банан и протеиновый батончик",
-    budget: "110-170 ₽",
-    ingredients: ["Молоко 400-500 мл", "Банан", "Протеиновый батончик"],
-    steps: [
-      "Купи по пути в магазине рядом с учебой.",
-      "Съешь в перерыв между занятиями.",
-      "Без готовки, но с нормальными калориями.",
-    ],
-  },
-  cheeseBunKefir: {
-    title: "Булка с сыром и кефир",
-    budget: "80-130 ₽",
-    ingredients: ["Булка", "Сыр 40-50 г", "Кефир 0.5 л"],
-    steps: [
-      "Собери булку с сыром.",
-      "Кефир выпей в длинный перерыв.",
-      "Простой бюджетный вариант без контейнеров.",
-    ],
-  },
-  shawarmaPlate: {
-    title: "Шаурма-тарелка (домашняя быстрая)",
-    budget: "130-220 ₽",
-    ingredients: ["Курица 150-180 г", "Лаваш", "Огурец или помидор", "Сметана"],
-    steps: [
-      "Курицу обжарь с солью и специями 8 минут.",
-      "Нарежь овощи и смешай со сметаной.",
-      "Подавай на тарелке с кусочками лаваша.",
-    ],
-  },
-  riceOmeletSausage: {
-    title: "Рис, омлет и колбаса",
-    budget: "110-170 ₽",
-    ingredients: ["Рис 100 г", "2 яйца", "Колбаса 80-100 г", "Соль"],
-    steps: [
-      "Отвари рис.",
-      "Сделай омлет из 2 яиц и нарежь полосками.",
-      "Обжарь колбасу, смешай с рисом и омлетом.",
-    ],
-  },
-  eggSandwichHot: {
-    title: "Горячие сэндвичи с яйцом и сыром",
-    budget: "80-130 ₽",
-    ingredients: ["Хлеб 4 ломтика", "2 яйца", "Сыр 40 г"],
-    steps: [
-      "Яйца пожарь как скрэмбл 2-3 минуты.",
-      "Собери сэндвичи с сыром.",
-      "Прогрей на сковороде 1-2 минуты.",
-    ],
-  },
-} as const satisfies Record<string, MealRecipe>;
-
-type RecipeKey = keyof typeof RECIPE_BOOK;
-
-type MealPlanEntry = {
-  id: string;
-  time: string;
-  title: string;
-  note: string;
-  recipeKey: RecipeKey;
-};
-
-function clampMinutes(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-const REWARDS = {
-  classVisited: 10,
-  safeDeposit: 50,
-  sleepOnTime: 20,
-  taskDone: 15,
-  dailyFocus: 35,
-};
-
-const FIREBASE_CONFIG = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "AIzaSyBUAhtj8iVzXPGlYCuYQe3AJotYvhp0Ql8",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? "routinemyhelpbot.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? "routinemyhelpbot",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? "routinemyhelpbot.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "834116069999",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? "1:834116069999:web:346f603346e3830c653b9a",
-};
-
-const TELEGRAM_BOT_TOKEN = import.meta.env.VITE_TELEGRAM_BOT_TOKEN ?? "";
-
-const FIREBASE_ENABLED = Object.values(FIREBASE_CONFIG).every(Boolean);
-const db = FIREBASE_ENABLED ? getFirestore(getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG)) : null;
-
-const TIMELINE_STYLE: Record<TimelineType, string> = {
-  homework: "timeline-homework",
-  rest: "timeline-rest",
-  freelance: "timeline-freelance",
-};
-
-const BREAKFAST_RECIPES: RecipeKey[] = ["omeletCheese", "oatmealMass", "eggSandwichHot", "pastaEgg", "teaSandwich", "curdBanana", "friedPotatoEgg", "yogurtOatsBanana"];
-const MAIN_RECIPES_WEEK1: RecipeKey[] = ["plov", "pastaSausageEgg", "buckwheatChicken", "pastaMince", "potatoStew", "pastaChicken", "riceEggChicken", "riceMince", "chickenPotato", "pastaStew", "riceChickenVeg", "shawarmaPlate"];
-const MAIN_RECIPES_WEEK2: RecipeKey[] = ["pastaCheese", "plov", "riceEggChicken", "pastaMince", "buckwheatChicken", "pastaSausage", "potatoStew", "buckwheatMince", "pastaCreamCheese", "riceOmeletSausage", "lavashChickenCheese", "chickenPotato"];
-const BREAK_SNACK_RECIPES: RecipeKey[] = ["barEnergy", "bananaPeanut", "proteinMilkBanana", "cheeseBunKefir", "curdJam", "kefirBanana"];
-const LATE_RECIPES: RecipeKey[] = ["kefirBanana", "curdBanana", "curdJam", "yogurtOatsBanana"];
-
-function lesson(weekType: WeekType, day: number, start: string, end: string, title: string, type: LessonType = "pair", mode: EduMode = "university"): ScheduleItem {
-  return { id: crypto.randomUUID(), mode, weekType, day, start, end, title, type, skipped: false };
-}
-
-const USER_TEMPLATE_SCHEDULE: ScheduleItem[] = [
-  // Week 1
-  lesson("week1", 0, "11:20", "12:50", "Физическая культура", "pair"),
-  lesson("week1", 0, "13:15", "14:45", "Правоведение (Лекция)", "pair"),
-  lesson("week1", 0, "15:00", "16:30", "Правоведение (Практика)", "pair"),
-  lesson("week1", 1, "08:00", "09:30", "Информационные технологии (Лекция)", "pair"),
-  lesson("week1", 1, "09:40", "11:10", "Информационные технологии (Лекция)", "pair"),
-  lesson("week1", 1, "11:20", "12:50", "Системный анализ (Практика)", "pair"),
-  lesson("week1", 2, "09:40", "11:10", "Экономическая теория (Практика)", "pair"),
-  lesson("week1", 2, "11:25", "12:55", "Этика проф. деятельности (Практика)", "pair"),
-  lesson("week1", 2, "13:15", "14:45", "Финансовая математика (Лекция)", "pair"),
-  lesson("week1", 2, "15:00", "16:30", "Менеджмент (Лекция)", "pair"),
-  lesson("week1", 3, "09:40", "11:10", "Экономическая теория (Лекция)", "pair"),
-  lesson("week1", 3, "11:20", "12:50", "Менеджмент (Практика)", "pair"),
-  lesson("week1", 3, "13:15", "14:45", "Финансовая математика (Практика)", "pair"),
-
-  // Week 2
-  lesson("week2", 0, "13:15", "14:45", "Правоведение (Лекция)", "pair"),
-  lesson("week2", 0, "15:00", "16:30", "Правоведение (Практика)", "pair"),
-  lesson("week2", 1, "08:00", "09:30", "Деловые коммуникации (Практика)", "pair"),
-  lesson("week2", 1, "09:40", "11:10", "Системный анализ (Лекция)", "pair"),
-  lesson("week2", 1, "11:25", "12:55", "Физическая культура (Практика)", "pair"),
-  lesson("week2", 2, "09:40", "11:10", "Экономическая теория (Практика)", "pair"),
-  lesson("week2", 2, "11:20", "12:50", "История России (Практика)", "pair"),
-  lesson("week2", 2, "13:15", "14:45", "Финансовая математика (Лекция)", "pair"),
-  lesson("week2", 2, "15:00", "16:30", "Менеджмент (Лекция)", "pair"),
-  lesson("week2", 3, "08:00", "09:30", "Этика проф. деятельности (Лекция)", "pair"),
-  lesson("week2", 3, "09:45", "11:15", "Деловые коммуникации (Лекция)", "pair"),
-  lesson("week2", 3, "11:30", "13:00", "Менеджмент (Практика)", "pair"),
-  lesson("week2", 3, "13:15", "14:45", "Финансовая математика (Практика)", "pair"),
-  lesson("week2", 4, "11:20", "12:50", "Информационные технологии (Лабораторная)", "pair"),
-  lesson("week2", 4, "13:15", "14:45", "Информационные технологии (Лабораторная)", "pair"),
-];
-
-function ensureLocalUid() {
-  const stored = localStorage.getItem("focus-vault-uid");
-  if (stored) return stored;
-  const id = crypto.randomUUID();
-  localStorage.setItem("focus-vault-uid", id);
-  return id;
-}
-
-function nowInTz() {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
-}
-
-function formatDate(date: Date) {
-  return new Intl.DateTimeFormat("ru-RU", { timeZone: TZ, dateStyle: "full" }).format(date);
-}
-
-function tzTime(date: Date) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    timeZone: TZ,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(date);
-}
-
-function timeToMinutes(value: string) {
-  const [h, m] = value.split(":").map(Number);
-  return h * 60 + m;
-}
-
-function minutesToTime(value: number) {
-  const normalized = ((value % 1440) + 1440) % 1440;
-  const h = Math.floor(normalized / 60);
-  const m = normalized % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-function addMinutes(time: string, amount: number) {
-  return minutesToTime(timeToMinutes(time) + amount);
-}
-
-function subtractMinutes(time: string, amount: number) {
-  return minutesToTime(timeToMinutes(time) - amount);
-}
-
-function toWeekStart(date: Date) {
-  const local = new Date(date);
-  const day = (local.getDay() + 6) % 7;
-  local.setHours(0, 0, 0, 0);
-  local.setDate(local.getDate() - day);
-  return local;
-}
-
-function getWeekKey(date = nowInTz()) {
-  const local = toWeekStart(date);
-  return `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
-}
-
-function weekDateFromKey(key: string) {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d, 0, 0, 0, 0);
-}
-
-function sundayLockPassed(weekKey: string, now = nowInTz()) {
-  const weekStart = weekDateFromKey(weekKey);
-  const lockPoint = new Date(weekStart);
-  lockPoint.setDate(lockPoint.getDate() + 6);
-  lockPoint.setHours(23, 59, 0, 0);
-  return now >= lockPoint;
-}
-
-function chelyabinskWeekday(date = nowInTz()) {
-  return (date.getDay() + 6) % 7;
-}
-
-function getAutoWeekType(now: Date, anchorDate: string) {
-  const anchor = new Date(anchorDate);
-  const currentWeekStart = toWeekStart(now);
-  const anchorWeekStart = toWeekStart(anchor);
-  const diffMs = currentWeekStart.getTime() - anchorWeekStart.getTime();
-  const weekShift = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
-  return Math.abs(weekShift) % 2 === 0 ? "week1" : "week2";
-}
-
-function getRotatedRecipe(source: RecipeKey[], index: number): RecipeKey {
-  return source[((index % source.length) + source.length) % source.length];
-}
-
-function toggleWeekType(weekType: WeekType): WeekType {
-  return weekType === "week1" ? "week2" : "week1";
-}
-
-function getNextDayFirstClassTime(schedule: ScheduleItem[], mode: EduMode, day: number, weekType: WeekType) {
-  for (let shift = 1; shift <= 7; shift += 1) {
-    const dayIndex = (day + shift) % 7;
-    const weekShift = Math.floor((day + shift) / 7);
-    const weekByShift = weekShift % 2 === 0 ? weekType : toggleWeekType(weekType);
-    const entries = schedule
-      .filter((item) => {
-        if (item.mode !== mode || item.day !== dayIndex) return false;
-        if (mode === "school") return true;
-        return item.weekType === weekByShift;
-      })
-      .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-
-    if (entries.length > 0) {
-      return entries[0].start;
-    }
-  }
-  return null;
-}
-
-function getBedtimeFromNextClass(nextClassStart: string | null, prepLeadMinutes: number) {
-  if (!nextClassStart) return "23:30";
-
-  const wakeMinutes = timeToMinutes(nextClassStart) - prepLeadMinutes;
-  let sleepMinutes = wakeMinutes - 8 * 60;
-
-  if (sleepMinutes < 20 * 60) sleepMinutes += 1440;
-  sleepMinutes = Math.max(21 * 60, Math.min(24 * 60 + 30, sleepMinutes));
-  return minutesToTime(sleepMinutes);
-}
-
-function buildMealPlan(dayLessons: ScheduleItem[], day: number, weekType: WeekType, bedtime: string, prepLeadMinutes: number): MealPlanEntry[] {
-  const sorted = dayLessons.slice().sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-  const firstClass = sorted[0]?.start;
-  const wakeBySchedule = firstClass ? subtractMinutes(firstClass, prepLeadMinutes) : null;
-  const breakfastRecipe = getRotatedRecipe(BREAKFAST_RECIPES, day + (weekType === "week2" ? 2 : 0));
-  const breakfastTime = firstClass
-    ? minutesToTime(clampMinutes(timeToMinutes(wakeBySchedule ?? "07:00") + 8, timeToMinutes("05:40"), timeToMinutes("10:40")))
-    : "09:00";
-
-  const plan: MealPlanEntry[] = [
-    {
-      id: crypto.randomUUID(),
-      time: breakfastTime,
-      title: RECIPE_BOOK[breakfastRecipe].title,
-      note: firstClass ? "Быстрый прием дома перед началом дня" : "Плотный домашний завтрак",
-      recipeKey: breakfastRecipe,
-    },
-  ];
-
-  let snackIndex = 0;
-  for (let i = 0; i < sorted.length - 1; i += 1) {
-    const current = sorted[i];
-    const next = sorted[i + 1];
-    const gap = timeToMinutes(next.start) - timeToMinutes(current.end);
-    if (gap >= 30) {
-      const snackKey = getRotatedRecipe(BREAK_SNACK_RECIPES, snackIndex + day);
-      snackIndex += 1;
-      plan.push({
-        id: crypto.randomUUID(),
-        time: addMinutes(current.end, 10),
-        title: RECIPE_BOOK[snackKey].title,
-        note: "Перерыв между занятиями: берется рядом с учебой, без готовки",
-        recipeKey: snackKey,
-      });
-    }
-  }
-
-  if (sorted.length > 0 && !plan.some((entry) => BREAK_SNACK_RECIPES.includes(entry.recipeKey))) {
-    const defaultSnack = getRotatedRecipe(BREAK_SNACK_RECIPES, day + 3);
-    plan.push({
-      id: crypto.randomUUID(),
-      time: firstClass ? addMinutes(firstClass, 170) : "11:30",
-      title: RECIPE_BOOK[defaultSnack].title,
-      note: "Дополнительный калорийный прием в середине дня",
-      recipeKey: defaultSnack,
-    });
-  }
-
-  const mainRecipe = getRotatedRecipe(weekType === "week1" ? MAIN_RECIPES_WEEK1 : MAIN_RECIPES_WEEK2, day + sorted.length);
-  const lastEnd = sorted[sorted.length - 1]?.end ?? "17:30";
-  plan.push({
-    id: crypto.randomUUID(),
-    time: firstClass ? addMinutes(lastEnd, 85) : "18:30",
-    title: RECIPE_BOOK[mainRecipe].title,
-    note: "Основной домашний прием пищи на набор массы",
-    recipeKey: mainRecipe,
-  });
-
-  const lateMealTime = minutesToTime(clampMinutes(timeToMinutes(subtractMinutes(bedtime, 75)), timeToMinutes("20:20"), timeToMinutes("23:30")));
-  const lateRecipe = getRotatedRecipe(LATE_RECIPES, day + (weekType === "week2" ? 1 : 0));
-  plan.push({
-    id: crypto.randomUUID(),
-    time: lateMealTime,
-    title: RECIPE_BOOK[lateRecipe].title,
-    note: "Спокойный прием перед сном для добора калорий",
-    recipeKey: lateRecipe,
-  });
-
-  if (!firstClass) {
-    const homeLunch = getRotatedRecipe(MAIN_RECIPES_WEEK1, day + 4);
-    const homeSnack = getRotatedRecipe(BREAK_SNACK_RECIPES, day + 2);
-    plan.unshift(
-      {
-        id: crypto.randomUUID(),
-        time: "13:20",
-        title: RECIPE_BOOK[homeLunch].title,
-        note: "Обед дома",
-        recipeKey: homeLunch,
-      },
-      {
-        id: crypto.randomUUID(),
-        time: "16:40",
-        title: RECIPE_BOOK[homeSnack].title,
-        note: "Перекус между делами",
-        recipeKey: homeSnack,
-      },
-    );
-  }
-
-  return plan.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
-}
-
-function createDefaultState(): AppData {
-  const weekKey = getWeekKey();
-  return {
-    profile: {
-      telegramId: "",
-      telegramUsername: "",
-      displayName: "Гость",
-    },
-    vault: {
-      balance: 0,
-      target: 30000,
-      lastPaidAt: null,
-    },
-    study: {
-      mode: "university",
-      absenceLimit: 20,
-      fallbackFirstClass: "08:00",
-      prepLeadMinutes: 120,
-      weekMode: "auto",
-      anchorDate: "2026-04-05",
-    },
-    schedule: USER_TEMPLATE_SCHEDULE,
-    planning: {
-      activeWeekKey: weekKey,
-    },
-    tasks: [
-      { id: crypto.randomUUID(), title: "ДЗ по менеджменту", type: "homework", status: "todo", weekKey, locked: false },
-      { id: crypto.randomUUID(), title: "Заказ на FunPay", type: "freelance", status: "doing", weekKey, locked: false },
-    ],
-    timeline: [
-      { id: crypto.randomUUID(), title: "ДЗ", type: "homework", start: 18, end: 20, weekKey, locked: false },
-      { id: crypto.randomUUID(), title: "Фриланс", type: "freelance", start: 20, end: 22, weekKey, locked: false },
-      { id: crypto.randomUUID(), title: "Отдых", type: "rest", start: 22, end: 24, weekKey, locked: false },
-    ],
-    alarm: {
-      enabled: false,
-      time: "06:30",
-      autoFromSchedule: true,
-      awakeConfirmedAt: null,
-    },
-    xp: {
-      points: 0,
-      spent: 0,
-      lastDailyClaim: null,
-    },
-  };
-}
-
-function normalizeState(input: AppData): AppData {
-  const active = input.planning.activeWeekKey || getWeekKey();
-  const rolledWeek = sundayLockPassed(active)
-    ? getWeekKey(new Date(weekDateFromKey(active).getTime() + 7 * 24 * 60 * 60 * 1000))
-    : active;
-
-  return {
-    ...input,
-    planning: { activeWeekKey: rolledWeek },
-    tasks: input.tasks.map((task) => ({ ...task, locked: task.weekKey !== rolledWeek })),
-    timeline: input.timeline.map((item) => ({ ...item, locked: item.weekKey !== rolledWeek })),
-  };
-}
-
-function hydrateState(raw: unknown): AppData {
-  const fallback = createDefaultState();
-  if (!raw || typeof raw !== "object") return fallback;
-  const incoming = raw as Partial<AppData>;
-  const schedule = Array.isArray(incoming.schedule)
-    ? incoming.schedule.map((item) => ({
-        ...item,
-        mode: (item as Partial<ScheduleItem>).mode ?? ((item as Partial<ScheduleItem>).type === "lesson" ? "school" : "university"),
-        weekType: (item as Partial<ScheduleItem>).weekType ?? "week1",
-      }))
-    : fallback.schedule;
-
-  return normalizeState({
-    ...fallback,
-    ...incoming,
-    profile: { ...fallback.profile, ...(incoming.profile ?? {}) },
-    vault: { ...fallback.vault, ...(incoming.vault ?? {}) },
-    study: { ...fallback.study, ...(incoming.study ?? {}) },
-    planning: { ...fallback.planning, ...(incoming.planning ?? {}) },
-    alarm: { ...fallback.alarm, ...(incoming.alarm ?? {}) },
-    xp: { ...fallback.xp, ...(incoming.xp ?? {}) },
-    schedule,
-    tasks: Array.isArray(incoming.tasks) ? incoming.tasks : fallback.tasks,
-    timeline: Array.isArray(incoming.timeline) ? incoming.timeline : fallback.timeline,
-  });
-}
-
-export default function App() {
-  const [data, setData] = useState<AppData>(createDefaultState);
-  const [loaded, setLoaded] = useState(false);
-  const [splashDone, setSplashDone] = useState(false);
-  const [syncLabel, setSyncLabel] = useState("Boot");
-  const [tab, setTab] = useState<TabKey>("vault");
-  const [tick, setTick] = useState(new Date());
-  const [identity, setIdentity] = useState<Identity>(() => ({
-    docId: ensureLocalUid(),
-    displayName: "Гость",
-    telegramUsername: "",
-    telegramId: "",
-    source: "local",
-  }));
-
-  const [vaultInput, setVaultInput] = useState(1000);
-  const [paymentWindow, setPaymentWindow] = useState<{ amount: number; expiresAt: number } | null>(null);
-  const [activeRecipe, setActiveRecipe] = useState<RecipeKey | null>(null);
-  const [botStatus, setBotStatus] = useState("");
-  const alarmTelegramSentRef = useRef(false);
-  const [selectedDay, setSelectedDay] = useState(() => chelyabinskWeekday());
-  const [selectedStudyDay, setSelectedStudyDay] = useState(() => chelyabinskWeekday());
-  const [studyEditorOpen, setStudyEditorOpen] = useState(false);
-  const [scheduleDraft, setScheduleDraft] = useState({
-    weekType: "week1" as WeekType,
-    day: chelyabinskWeekday(),
-    start: "08:00",
-    end: "09:30",
-    title: "",
-    type: "pair" as LessonType,
-  });
-  const [newTask, setNewTask] = useState("");
-  const [newTaskType, setNewTaskType] = useState<TaskType>("homework");
-  const [timelineDraft, setTimelineDraft] = useState({ title: "", type: "homework" as TimelineType, start: 18, end: 20 });
-
-  const nowChelyab = nowInTz();
-  const autoWeekType = getAutoWeekType(nowChelyab, data.study.anchorDate);
-  const activeWeekType: WeekType = data.study.weekMode === "auto" ? autoWeekType : data.study.weekMode;
-  const currentTime = tzTime(tick);
-
-  const scopedSchedule = useMemo(
-    () =>
-      data.schedule
-        .filter((item) => {
-          if (item.mode !== data.study.mode) return false;
-          if (data.study.mode === "school") return true;
-          return item.weekType === activeWeekType;
-        })
-        .sort((a, b) => a.day - b.day || timeToMinutes(a.start) - timeToMinutes(b.start)),
-    [data.schedule, data.study.mode, activeWeekType],
-  );
-
-  const selectedDaySchedule = useMemo(
-    () => scopedSchedule.filter((item) => item.day === selectedDay).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
-    [scopedSchedule, selectedDay],
-  );
-  const selectedStudySchedule = useMemo(
-    () => scopedSchedule.filter((item) => item.day === selectedStudyDay).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
-    [scopedSchedule, selectedStudyDay],
-  );
-
-  const selectedDayFirstClass = selectedDaySchedule[0]?.start ?? null;
-  const selectedDayWakeTime = selectedDayFirstClass ? subtractMinutes(selectedDayFirstClass, data.study.prepLeadMinutes) : null;
-  const selectedDayNextClass = useMemo(
-    () => getNextDayFirstClassTime(data.schedule, data.study.mode, selectedDay, activeWeekType),
-    [data.schedule, data.study.mode, selectedDay, activeWeekType],
-  );
-  const selectedDayBedtime = useMemo(() => getBedtimeFromNextClass(selectedDayNextClass, data.study.prepLeadMinutes), [selectedDayNextClass, data.study.prepLeadMinutes]);
-
-  const nextClassInfo = useMemo(() => {
-    const nowMinutes = timeToMinutes(currentTime);
-
-    for (let dayShift = 0; dayShift < 14; dayShift += 1) {
-      const date = new Date(nowChelyab);
-      date.setDate(nowChelyab.getDate() + dayShift);
-      const dayIndex = chelyabinskWeekday(date);
-      const weekTypeByDate: WeekType = data.study.weekMode === "auto" ? getAutoWeekType(date, data.study.anchorDate) : data.study.weekMode;
-
-      const daySchedule = data.schedule
-        .filter((item) => {
-          if (item.mode !== data.study.mode) return false;
-          if (item.day !== dayIndex) return false;
-          if (data.study.mode === "school") return true;
-          return item.weekType === weekTypeByDate;
-        })
-        .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-
-      if (daySchedule.length === 0) continue;
-
-      const classForDay =
-        dayShift === 0
-          ? daySchedule.find((item) => timeToMinutes(item.start) > nowMinutes)
-          : daySchedule[0];
-
-      if (!classForDay) continue;
-
-      return {
-        dayShift,
-        dayIndex,
-        start: classForDay.start,
-        title: classForDay.title,
-      };
-    }
-
-    return null;
-  }, [data.schedule, data.study.mode, data.study.weekMode, data.study.anchorDate, currentTime, nowChelyab]);
-
-  const wakeTime = nextClassInfo ? subtractMinutes(nextClassInfo.start, data.study.prepLeadMinutes) : data.alarm.time;
-  const sleepTime = subtractMinutes(wakeTime, 8 * 60);
-  const shouldSleep = Boolean(nextClassInfo) && timeToMinutes(currentTime) >= timeToMinutes(sleepTime);
-  const alarmTriggered = data.alarm.enabled && timeToMinutes(currentTime) >= timeToMinutes(data.alarm.time) && !data.alarm.awakeConfirmedAt;
-
-  const mealPlan = useMemo(
-    () => buildMealPlan(selectedDaySchedule, selectedDay, activeWeekType, selectedDayBedtime, data.study.prepLeadMinutes),
-    [selectedDaySchedule, selectedDay, activeWeekType, selectedDayBedtime, data.study.prepLeadMinutes],
-  );
-
-  const paymentMs = paymentWindow ? Math.max(0, paymentWindow.expiresAt - tick.getTime()) : 0;
-  const paymentMinutes = Math.floor(paymentMs / 60000);
-  const paymentSeconds = Math.floor((paymentMs % 60000) / 1000);
-  const safeProgress = Math.min(100, Math.round((data.vault.balance / Math.max(1, data.vault.target)) * 100));
-
-  const weekSkipped = scopedSchedule.filter((item) => item.skipped).length;
-  const attendancePercent = Math.min(100, Math.round((weekSkipped / Math.max(1, data.study.absenceLimit)) * 100));
-
-  const weekKey = data.planning.activeWeekKey;
-  const currentTasks = data.tasks.filter((item) => item.weekKey === weekKey);
-  const currentTimeline = data.timeline.filter((item) => item.weekKey === weekKey);
-  const archiveWeeks = [...new Set(data.tasks.map((item) => item.weekKey).filter((item) => item !== weekKey))].sort().reverse();
-
-  useEffect(() => {
-    const interval = setInterval(() => setTick(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setSplashDone(true), 1400);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!paymentWindow || paymentMs > 0) return;
-    setPaymentWindow(null);
-  }, [paymentWindow, paymentMs]);
-
-  useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-    if (!tg) return;
-
-    tg.ready();
-    tg.expand();
-
-    const user = tg.initDataUnsafe?.user;
-    if (!user?.id) return;
-
-    const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || `ID ${user.id}`;
-    setIdentity({
-      docId: `tg-${user.id}`,
-      displayName: name,
-      telegramUsername: user.username ? `@${user.username}` : `id:${user.id}`,
-      telegramId: String(user.id),
-      source: "telegram",
-    });
-  }, []);
-
-  useEffect(() => {
-    const bootstrap = async () => {
-      setLoaded(false);
-      const localRaw = localStorage.getItem("focus-vault-local-data");
-      let localState = createDefaultState();
-
-      try {
-        localState = hydrateState(localRaw ? JSON.parse(localRaw) : createDefaultState());
-      } catch {
-        localState = createDefaultState();
-      }
-
-      if (!db) {
-        setData({
-          ...localState,
-          profile: {
-            telegramId: identity.telegramId,
-            telegramUsername: identity.telegramUsername,
-            displayName: identity.displayName,
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Routine App</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Framer Motion -->
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+    
+    <!-- Babel (для компиляции React прямо в браузере) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Стили для красивого отображения интерфейса -->
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .app-shell { @apply min-h-screen bg-[#0a0a0f] text-slate-200 overflow-x-hidden relative font-sans; }
+            .ambient { @apply absolute rounded-full blur-[100px] mix-blend-screen pointer-events-none; }
+            .ambient-left { @apply w-[500px] h-[500px] bg-indigo-600/30 -left-[200px] top-[10%]; }
+            .ambient-right { @apply w-[400px] h-[400px] bg-purple-600/30 -right-[150px] top-[40%]; }
+            .ambient-mid { @apply w-[600px] h-[600px] bg-blue-600/20 left-1/2 -translate-x-1/2 bottom-[-200px]; }
+            .aurora-ribbon { @apply absolute w-[150%] h-[200px] blur-[80px] pointer-events-none; }
+            .aurora-top { @apply bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-purple-500/10 -top-[100px] -left-[25%] -rotate-6; }
+            .aurora-bottom { @apply bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-red-500/10 bottom-[10%] -left-[25%] rotate-12; }
+            .wordmark-ghost { @apply absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[15vw] font-black text-white/5 pointer-events-none tracking-widest; }
+
+            .hero-surface { @apply relative z-10 bg-white/[0.03] border border-white/[0.08] backdrop-blur-xl rounded-3xl p-6 md:p-8 shadow-2xl; }
+            .hero-grid { @apply flex flex-col md:flex-row justify-between gap-6; }
+            .hero-title { @apply text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400; }
+            .hero-subtitle { @apply mt-2 text-slate-400 text-sm md:text-base max-w-md; }
+            .hero-meta { @apply text-left md:text-right text-sm text-slate-500 flex flex-col items-start md:items-end gap-1; }
+            .hero-time { @apply text-2xl font-mono text-slate-300; }
+
+            .tab-bar { @apply flex gap-2 overflow-x-auto pb-2 scrollbar-hide; }
+            .tab-btn { @apply relative px-5 py-2.5 rounded-full text-sm font-medium transition-colors text-slate-400 hover:text-white whitespace-nowrap; }
+            .tab-btn.active { @apply text-white; }
+            .tab-pill { @apply absolute inset-0 bg-white/10 rounded-full border border-white/10; }
+
+            .feature-surface { @apply relative z-10 mt-6 bg-white/[0.02] border border-white/[0.05] backdrop-blur-lg rounded-3xl p-6; }
+            .feature-title { @apply text-2xl font-bold text-slate-200; }
+            .feature-text { @apply mt-1 text-sm text-slate-400; }
+
+            .field { @apply bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-slate-200 outline-none focus:border-blue-500 transition-colors w-full; color-scheme: dark; }
+            .label { @apply block text-sm font-medium text-slate-400 mb-1.5; }
+
+            .primary-btn { @apply bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl font-medium transition-all active:scale-95 whitespace-nowrap shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:active:scale-100; }
+            .secondary-btn { @apply bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 px-5 py-2 rounded-xl font-medium transition-all active:scale-95 whitespace-nowrap; }
+            .secondary-btn.active { @apply bg-white/20 border-white/30 text-white; }
+            .danger-btn { @apply bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 px-5 py-2 rounded-xl font-medium transition-all active:scale-95 whitespace-nowrap; }
+            .tight { @apply px-3 py-1.5 text-sm; }
+
+            .metric-label { @apply text-sm text-slate-400 uppercase tracking-wider font-semibold; }
+            .metric-value { @apply text-3xl font-bold text-white mt-1; }
+            .progress-line { @apply w-full h-2 bg-black/50 rounded-full overflow-hidden; }
+            .progress-fill { @apply h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full; }
+
+            .line-item { @apply bg-black/20 border border-white/5 rounded-xl p-4 transition-colors; }
+            .line-item-btn { @apply w-full text-left hover:bg-white/5 flex gap-4 items-center; }
+
+            .recipe-sheet { @apply mt-6 bg-indigo-950/30 border border-indigo-500/20 rounded-2xl p-5; }
+            .recipe-title { @apply text-lg font-bold text-indigo-300; }
+
+            .column-shell { @apply bg-black/20 rounded-2xl p-4 border border-white/5; }
+            .column-title { @apply text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wider; }
+            .task-chip { @apply w-full text-left bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl p-3 text-sm transition-all disabled:opacity-50; }
+
+            .time-axis { @apply flex justify-between text-xs text-slate-500 border-b border-white/10 pb-2 mb-2; }
+            .timeline-block { @apply rounded-lg p-2 text-xs font-medium truncate flex items-center border; }
+            .timeline-homework { @apply bg-blue-500/20 border-blue-500/30 text-blue-200; }
+            .timeline-freelance { @apply bg-purple-500/20 border-purple-500/30 text-purple-200; }
+            .timeline-rest { @apply bg-emerald-500/20 border-emerald-500/30 text-emerald-200; }
+
+            .sleep-alert { @apply p-4 rounded-xl text-sm font-medium border mt-4; }
+            .sleep-alert.ok { @apply bg-emerald-500/10 border-emerald-500/20 text-emerald-300; }
+            .sleep-alert.late { @apply bg-red-500/10 border-red-500/20 text-red-300; }
+
+            .alarm-overlay { @apply p-5 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl text-yellow-200; }
+
+            .payment-overlay { @apply fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4; }
+            .payment-window { @apply bg-[#1a1a24] border border-white/10 rounded-3xl p-8 max-w-sm w-full shadow-2xl; }
+            .payment-amount { @apply text-4xl font-bold text-white my-4; }
+
+            .app-loader { @apply flex flex-col items-center justify-center; }
+            .loader-stage { @apply relative w-32 h-32 mb-8; }
+            .loader-orbit { @apply absolute inset-0 border-2 border-dashed border-blue-500/30 rounded-full animate-[spin_10s_linear_infinite]; }
+            .loader-ring { @apply absolute inset-4 border-2 border-purple-500/40 rounded-full animate-[spin_3s_linear_infinite_reverse]; }
+            .loader-scan { @apply absolute inset-8 bg-gradient-to-t from-cyan-500/40 to-transparent rounded-full animate-pulse; }
+            .loader-text { @apply text-slate-400 font-mono text-sm tracking-widest uppercase; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Место куда будет загружено приложение -->
+    <div id="root"></div>
+
+    <!-- Основной код приложения -->
+    <script type="text/babel" data-type="module" data-presets="react">
+        import { getApp, getApps, initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { doc, getDoc, getFirestore, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const { useEffect, useMemo, useRef, useState } = React;
+        const { AnimatePresence, motion } = window.Motion;
+
+        const TZ = "Asia/Yekaterinburg";
+        const OZON_PHONE = "+79525081814";
+        const DAYS_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
+        const DAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+        const RECIPE_BOOK = {
+          teaSandwich: {
+            title: "Чай и бутерброды с сыром/колбасой",
+            budget: "60-110 ₽",
+            ingredients: ["Хлеб 2-4 ломтика", "Сыр", "Колбаса", "Чай"],
+            steps: [
+              "Собери 2 бутерброда с сыром и колбасой.",
+              "Обжарь на сухой сковороде по 1 минуте с каждой стороны или разогрей в микроволновке.",
+              "Завари чай, ешь за 30-60 минут до выхода.",
+            ],
           },
-        });
-        setSyncLabel("Local mode");
-        setLoaded(true);
-        return;
-      }
+          barEnergy: {
+            title: "Протеиновый батончик и энергетик",
+            budget: "120-180 ₽",
+            ingredients: ["1 протеиновый батончик", "1 энергетик 0.25-0.45"],
+            steps: ["Держи запас в рюкзаке.", "Используй на коротком перерыве между парами."],
+          },
+          bananaPeanut: {
+            title: "Банан и арахис",
+            budget: "45-80 ₽",
+            ingredients: ["1-2 банана", "Пакет арахиса 40-60 г"],
+            steps: ["Быстрый перекус без готовки.", "Ешь в длинный перерыв, когда нет времени на столовую."],
+          },
+          plov: {
+            title: "Плов на сковороде",
+            budget: "130-220 ₽",
+            ingredients: ["Рис 120-150 г", "Курица или свинина 180-220 г", "Лук", "Морковь", "Соль, перец"],
+            steps: [
+              "Нарежь мясо, обжарь 7-8 минут.",
+              "Добавь лук и морковь, жарь еще 4 минуты.",
+              "Засыпь промытый рис, залей горячей водой на 1.5 см выше риса.",
+              "Туши под крышкой 18-20 минут на слабом огне.",
+            ],
+          },
+          pastaSausage: {
+            title: "Макароны с колбасой",
+            budget: "90-150 ₽",
+            ingredients: ["Макароны 100-120 г", "Колбаса 120 г", "Масло", "Соль"],
+            steps: [
+              "Отвари макароны 8-10 минут.",
+              "Колбасу нарежь и обжарь 2-3 минуты.",
+              "Смешай макароны с колбасой, посоли по вкусу.",
+            ],
+          },
+          pastaSausageEgg: {
+            title: "Макароны с колбасой и яйцами",
+            budget: "110-170 ₽",
+            ingredients: ["Макароны 100-120 г", "Колбаса 100-120 г", "2-3 яйца", "Соль"],
+            steps: [
+              "Отвари макароны.",
+              "Обжарь колбасу 2 минуты.",
+              "Влей яйца, размешай, затем добавь макароны и доведи 2-3 минуты.",
+            ],
+          },
+          pastaEgg: {
+            title: "Макароны с яйцами",
+            budget: "70-120 ₽",
+            ingredients: ["Макароны 100-120 г", "2-3 яйца", "Соль", "Чуть масла"],
+            steps: ["Отвари макароны.", "На сковороде сделай яичную смесь и вмешай макароны.", "Готово за 10-12 минут."],
+          },
+          pastaMince: {
+            title: "Макароны с фаршем",
+            budget: "120-200 ₽",
+            ingredients: ["Макароны 100-120 г", "Фарш 180-220 г", "Лук", "Соль, перец"],
+            steps: [
+              "Обжарь фарш с луком 8-10 минут, разминая комки.",
+              "Отвари макароны отдельно.",
+              "Смешай, прогрей 2 минуты.",
+            ],
+          },
+          pastaChicken: {
+            title: "Макароны с курицей",
+            budget: "120-190 ₽",
+            ingredients: ["Макароны 100-120 г", "Курица 180-220 г", "Соль", "Паприка по желанию"],
+            steps: [
+              "Нарежь курицу кусочками, обжарь 8-10 минут до готовности.",
+              "Отвари макароны.",
+              "Смешай макароны и курицу, прогрей 1-2 минуты.",
+            ],
+          },
+          pastaCheese: {
+            title: "Макароны с сыром",
+            budget: "90-160 ₽",
+            ingredients: ["Макароны 100-120 г", "Сыр 60-90 г", "Немного сливочного масла"],
+            steps: [
+              "Отвари макароны.",
+              "Добавь масло и тертый сыр в горячие макароны.",
+              "Перемешай до тягучей текстуры.",
+            ],
+          },
+          kefirBanana: {
+            title: "Кефир и банан перед сном",
+            budget: "50-90 ₽",
+            ingredients: ["Кефир 0.5 л", "1 банан"],
+            steps: ["Выпей кефир за 40-60 минут до сна.", "Банан добавь, если остался голод."],
+          },
+          buckwheatChicken: {
+            title: "Гречка с курицей",
+            budget: "110-180 ₽",
+            ingredients: ["Гречка 100-120 г", "Курица 180-220 г", "Лук", "Соль, перец"],
+            steps: [
+              "Гречку промой и отвари 15-18 минут.",
+              "Курицу нарежь и обжарь 8-10 минут.",
+              "Добавь лук, жарь еще 2 минуты и смешай с гречкой.",
+            ],
+          },
+          potatoStew: {
+            title: "Картошка с тушенкой",
+            budget: "120-190 ₽",
+            ingredients: ["Картофель 4-5 шт", "Тушенка 1/2-1 банка", "Лук", "Соль"],
+            steps: [
+              "Картошку нарежь кубиком и отвари 12-15 минут до мягкости.",
+              "На сковороде прогрей тушенку с луком 4-5 минут.",
+              "Смешай с картошкой и прогрей 2 минуты.",
+            ],
+          },
+          riceEggChicken: {
+            title: "Рис с курицей и яйцом",
+            budget: "120-200 ₽",
+            ingredients: ["Рис 100-120 г", "Курица 150-200 г", "2 яйца", "Соль"],
+            steps: [
+              "Рис отвари 12-15 минут.",
+              "Курицу обжарь до готовности 8-10 минут.",
+              "Добавь яйца, размешай и смешай с рисом.",
+            ],
+          },
+          oatmealMass: {
+            title: "Овсянка с бананом и арахисом",
+            budget: "55-90 ₽",
+            ingredients: ["Овсянка 70-90 г", "Молоко или вода", "1 банан", "Арахис 20-30 г"],
+            steps: [
+              "Залей овсянку молоком или водой и вари 4-6 минут.",
+              "Добавь нарезанный банан и арахис.",
+              "Хороший плотный завтрак без сложной готовки.",
+            ],
+          },
+          curdBanana: {
+            title: "Творог с бананом",
+            budget: "85-130 ₽",
+            ingredients: ["Творог 180-200 г", "1 банан"],
+            steps: ["В миску выложи творог.", "Нарежь банан кружками и смешай.", "Если сухо, добавь 1-2 ложки кефира."],
+          },
+          overnightOats: {
+            title: "Овсянка на ночь в контейнере",
+            budget: "55-95 ₽",
+            ingredients: ["Овсянка 70-90 г", "Молоко 200-250 мл", "Банан", "Арахис 20 г"],
+            steps: [
+              "С вечера засыпь овсянку в контейнер и залей молоком.",
+              "Добавь нарезанный банан и арахис, закрой крышкой.",
+              "Утром просто достань из холодильника и ешь без готовки.",
+            ],
+          },
+          peanutSandwiches: {
+            title: "Сэндвичи с арахисовой пастой и бананом",
+            budget: "70-130 ₽",
+            ingredients: ["Хлеб 4 ломтика", "Арахисовая паста", "1 банан"],
+            steps: [
+              "Намажь пасту на хлеб.",
+              "Добавь кружки банана и закрой сэндвич.",
+              "Убери в контейнер: удобно взять в дорогу и на перерыв.",
+            ],
+          },
+          eggsBreadCheese: {
+            title: "Яйца, хлеб и сыр",
+            budget: "75-120 ₽",
+            ingredients: ["3 яйца", "Хлеб", "Сыр 30-40 г", "Соль"],
+            steps: [
+              "Свари яйца заранее на 2 дня вперед (8-9 минут).",
+              "Утром только собери в контейнер яйца, хлеб и сыр.",
+              "Можно есть без разогрева, удобно в универе.",
+            ],
+          },
+          omeletCheese: {
+            title: "Омлет с сыром и хлебом",
+            budget: "80-130 ₽",
+            ingredients: ["3 яйца", "Сыр 40-50 г", "Хлеб 2 ломтика", "Соль"],
+            steps: [
+              "Взбей яйца с щепоткой соли.",
+              "Вылей на разогретую сковороду, добавь сыр и накрой крышкой на 4-5 минут.",
+              "Подавай с хлебом. Готово быстро и сытно.",
+            ],
+          },
+          friedPotatoEgg: {
+            title: "Жареная картошка с яйцами",
+            budget: "90-150 ₽",
+            ingredients: ["Картофель 3-4 шт", "2 яйца", "Масло", "Соль"],
+            steps: [
+              "Нарежь картошку тонко и обжарь 10-12 минут до мягкости.",
+              "Добавь яйца, перемешай и жарь еще 2-3 минуты.",
+              "Простое калорийное блюдо на набор.",
+            ],
+          },
+          riceMince: {
+            title: "Рис с фаршем",
+            budget: "120-190 ₽",
+            ingredients: ["Рис 100-120 г", "Фарш 180-220 г", "Лук", "Соль, перец"],
+            steps: [
+              "Отвари рис 12-15 минут.",
+              "Фарш с луком обжарь 8-10 минут.",
+              "Смешай рис с фаршем и прогрей 2 минуты.",
+            ],
+          },
+          buckwheatMince: {
+            title: "Гречка с фаршем",
+            budget: "120-190 ₽",
+            ingredients: ["Гречка 100-120 г", "Фарш 180-220 г", "Лук", "Соль"],
+            steps: [
+              "Гречку отвари 15-18 минут.",
+              "Фарш обжарь с луком 8-10 минут.",
+              "Смешай, посоли, прогрей 2 минуты.",
+            ],
+          },
+          pastaStew: {
+            title: "Макароны с тушенкой",
+            budget: "100-170 ₽",
+            ingredients: ["Макароны 100-120 г", "Тушенка 1/2 банки", "Соль"],
+            steps: [
+              "Отвари макароны до готовности.",
+              "Тушенку прогрей на сковороде 3-4 минуты.",
+              "Смешай с макаронами и прогрей 1 минуту.",
+            ],
+          },
+          chickenPotato: {
+            title: "Курица с картошкой на сковороде",
+            budget: "130-210 ₽",
+            ingredients: ["Курица 180-220 г", "Картофель 3-4 шт", "Соль, специи"],
+            steps: [
+              "Курицу обжарь 6-7 минут.",
+              "Добавь картошку кубиком, накрой крышкой и готовь 12-15 минут.",
+              "Перемешай и доведи до готовности.",
+            ],
+          },
+          pastaCreamCheese: {
+            title: "Макароны в сырном соусе",
+            budget: "120-180 ₽",
+            ingredients: ["Макароны 120 г", "Сыр 70-90 г", "Молоко 120 мл", "Соль"],
+            steps: [
+              "Отвари макароны.",
+              "В ковшике прогрей молоко, добавь тертый сыр.",
+              "Смешай соус с макаронами и подержи 1 минуту на огне.",
+            ],
+          },
+          riceChickenVeg: {
+            title: "Рис с курицей и овощной смесью",
+            budget: "130-210 ₽",
+            ingredients: ["Рис 100-120 г", "Курица 180 г", "Замороженные овощи 120 г", "Соль"],
+            steps: [
+              "Рис отвари отдельно.",
+              "Курицу обжарь 7-8 минут.",
+              "Добавь овощи на 5 минут, затем смешай с рисом.",
+            ],
+          },
+          lavashChickenCheese: {
+            title: "Лаваш с курицей и сыром",
+            budget: "110-170 ₽",
+            ingredients: ["Лаваш 1 шт", "Курица 120-150 г", "Сыр 40 г"],
+            steps: [
+              "Курицу быстро обжарь на сильном огне 6-7 минут.",
+              "Выложи в лаваш, добавь сыр и сверни.",
+              "Прогрей на сухой сковороде 1-2 минуты.",
+            ],
+          },
+          curdJam: {
+            title: "Творог с бананом и ложкой варенья",
+            budget: "90-140 ₽",
+            ingredients: ["Творог 180-200 г", "Банан", "1 ложка варенья"],
+            steps: [
+              "Смешай творог с бананом.",
+              "Добавь ложку варенья для калорий и вкуса.",
+              "Готово без готовки.",
+            ],
+          },
+          yogurtOatsBanana: {
+            title: "Йогурт, овсянка и банан",
+            budget: "70-120 ₽",
+            ingredients: ["Питьевой йогурт 250-300 мл", "Овсянка 40 г", "Банан"],
+            steps: [
+              "Смешай овсянку и йогурт в миске.",
+              "Добавь банан кусочками.",
+              "Подходит как быстрый калорийный прием.",
+            ],
+          },
+          proteinMilkBanana: {
+            title: "Молоко, банан и протеиновый батончик",
+            budget: "110-170 ₽",
+            ingredients: ["Молоко 400-500 мл", "Банан", "Протеиновый батончик"],
+            steps: [
+              "Купи по пути в магазине рядом с учебой.",
+              "Съешь в перерыв между занятиями.",
+              "Без готовки, но с нормальными калориями.",
+            ],
+          },
+          cheeseBunKefir: {
+            title: "Булка с сыром и кефир",
+            budget: "80-130 ₽",
+            ingredients: ["Булка", "Сыр 40-50 г", "Кефир 0.5 л"],
+            steps: [
+              "Собери булку с сыром.",
+              "Кефир выпей в длинный перерыв.",
+              "Простой бюджетный вариант без контейнеров.",
+            ],
+          },
+          shawarmaPlate: {
+            title: "Шаурма-тарелка (домашняя быстрая)",
+            budget: "130-220 ₽",
+            ingredients: ["Курица 150-180 г", "Лаваш", "Огурец или помидор", "Сметана"],
+            steps: [
+              "Курицу обжарь с солью и специями 8 минут.",
+              "Нарежь овощи и смешай со сметаной.",
+              "Подавай на тарелке с кусочками лаваша.",
+            ],
+          },
+          riceOmeletSausage: {
+            title: "Рис, омлет и колбаса",
+            budget: "110-170 ₽",
+            ingredients: ["Рис 100 г", "2 яйца", "Колбаса 80-100 г", "Соль"],
+            steps: [
+              "Отвари рис.",
+              "Сделай омлет из 2 яиц и нарежь полосками.",
+              "Обжарь колбасу, смешай с рисом и омлетом.",
+            ],
+          },
+          eggSandwichHot: {
+            title: "Горячие сэндвичи с яйцом и сыром",
+            budget: "80-130 ₽",
+            ingredients: ["Хлеб 4 ломтика", "2 яйца", "Сыр 40 г"],
+            steps: [
+              "Яйца пожарь как скрэмбл 2-3 минуты.",
+              "Собери сэндвичи с сыром.",
+              "Прогрей на сковороде 1-2 минуты.",
+            ],
+          },
+        };
 
-      try {
-        setSyncLabel("Firebase sync...");
-        const ref = doc(db, "focusVault", identity.docId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          const remote = hydrateState(snap.data().state);
-          setData({
-            ...remote,
-            profile: {
-              telegramId: identity.telegramId,
-              telegramUsername: identity.telegramUsername,
-              displayName: identity.displayName,
+        function clampMinutes(value, min, max) {
+          return Math.max(min, Math.min(max, value));
+        }
+
+        const REWARDS = {
+          classVisited: 10,
+          safeDeposit: 50,
+          sleepOnTime: 20,
+          taskDone: 15,
+          dailyFocus: 35,
+        };
+
+        const FIREBASE_CONFIG = {
+          apiKey: "AIzaSyBUAhtj8iVzXPGlYCuYQe3AJotYvhp0Ql8",
+          authDomain: "routinemyhelpbot.firebaseapp.com",
+          projectId: "routinemyhelpbot",
+          storageBucket: "routinemyhelpbot.firebasestorage.app",
+          messagingSenderId: "834116069999",
+          appId: "1:834116069999:web:346f603346e3830c653b9a",
+        };
+
+        const TELEGRAM_BOT_TOKEN = ""; // Было в импортах vite, нужно вводить отдельно если нужно
+
+        const FIREBASE_ENABLED = Object.values(FIREBASE_CONFIG).every(Boolean);
+        const db = FIREBASE_ENABLED ? getFirestore(getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG)) : null;
+
+        const TIMELINE_STYLE = {
+          homework: "timeline-homework",
+          rest: "timeline-rest",
+          freelance: "timeline-freelance",
+        };
+
+        const BREAKFAST_RECIPES = ["omeletCheese", "oatmealMass", "eggSandwichHot", "pastaEgg", "teaSandwich", "curdBanana", "friedPotatoEgg", "yogurtOatsBanana"];
+        const MAIN_RECIPES_WEEK1 = ["plov", "pastaSausageEgg", "buckwheatChicken", "pastaMince", "potatoStew", "pastaChicken", "riceEggChicken", "riceMince", "chickenPotato", "pastaStew", "riceChickenVeg", "shawarmaPlate"];
+        const MAIN_RECIPES_WEEK2 = ["pastaCheese", "plov", "riceEggChicken", "pastaMince", "buckwheatChicken", "pastaSausage", "potatoStew", "buckwheatMince", "pastaCreamCheese", "riceOmeletSausage", "lavashChickenCheese", "chickenPotato"];
+        const BREAK_SNACK_RECIPES = ["barEnergy", "bananaPeanut", "proteinMilkBanana", "cheeseBunKefir", "curdJam", "kefirBanana"];
+        const LATE_RECIPES = ["kefirBanana", "curdBanana", "curdJam", "yogurtOatsBanana"];
+
+        function lesson(weekType, day, start, end, title, type = "pair", mode = "university") {
+          return { id: crypto.randomUUID(), mode, weekType, day, start, end, title, type, skipped: false };
+        }
+
+        const USER_TEMPLATE_SCHEDULE = [
+          lesson("week1", 0, "11:20", "12:50", "Физическая культура", "pair"),
+          lesson("week1", 0, "13:15", "14:45", "Правоведение (Лекция)", "pair"),
+          lesson("week1", 0, "15:00", "16:30", "Правоведение (Практика)", "pair"),
+          lesson("week1", 1, "08:00", "09:30", "Информационные технологии (Лекция)", "pair"),
+          lesson("week1", 1, "09:40", "11:10", "Информационные технологии (Лекция)", "pair"),
+          lesson("week1", 1, "11:20", "12:50", "Системный анализ (Практика)", "pair"),
+          lesson("week1", 2, "09:40", "11:10", "Экономическая теория (Практика)", "pair"),
+          lesson("week1", 2, "11:25", "12:55", "Этика проф. деятельности (Практика)", "pair"),
+          lesson("week1", 2, "13:15", "14:45", "Финансовая математика (Лекция)", "pair"),
+          lesson("week1", 2, "15:00", "16:30", "Менеджмент (Лекция)", "pair"),
+          lesson("week1", 3, "09:40", "11:10", "Экономическая теория (Лекция)", "pair"),
+          lesson("week1", 3, "11:20", "12:50", "Менеджмент (Практика)", "pair"),
+          lesson("week1", 3, "13:15", "14:45", "Финансовая математика (Практика)", "pair"),
+          lesson("week2", 0, "13:15", "14:45", "Правоведение (Лекция)", "pair"),
+          lesson("week2", 0, "15:00", "16:30", "Правоведение (Практика)", "pair"),
+          lesson("week2", 1, "08:00", "09:30", "Деловые коммуникации (Практика)", "pair"),
+          lesson("week2", 1, "09:40", "11:10", "Системный анализ (Лекция)", "pair"),
+          lesson("week2", 1, "11:25", "12:55", "Физическая культура (Практика)", "pair"),
+          lesson("week2", 2, "09:40", "11:10", "Экономическая теория (Практика)", "pair"),
+          lesson("week2", 2, "11:20", "12:50", "История России (Практика)", "pair"),
+          lesson("week2", 2, "13:15", "14:45", "Финансовая математика (Лекция)", "pair"),
+          lesson("week2", 2, "15:00", "16:30", "Менеджмент (Лекция)", "pair"),
+          lesson("week2", 3, "08:00", "09:30", "Этика проф. деятельности (Лекция)", "pair"),
+          lesson("week2", 3, "09:45", "11:15", "Деловые коммуникации (Лекция)", "pair"),
+          lesson("week2", 3, "11:30", "13:00", "Менеджмент (Практика)", "pair"),
+          lesson("week2", 3, "13:15", "14:45", "Финансовая математика (Практика)", "pair"),
+          lesson("week2", 4, "11:20", "12:50", "Информационные технологии (Лабораторная)", "pair"),
+          lesson("week2", 4, "13:15", "14:45", "Информационные технологии (Лабораторная)", "pair"),
+        ];
+
+        function ensureLocalUid() {
+          const stored = localStorage.getItem("focus-vault-uid");
+          if (stored) return stored;
+          const id = crypto.randomUUID();
+          localStorage.setItem("focus-vault-uid", id);
+          return id;
+        }
+
+        function nowInTz() {
+          return new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+        }
+
+        function formatDate(date) {
+          return new Intl.DateTimeFormat("ru-RU", { timeZone: TZ, dateStyle: "full" }).format(date);
+        }
+
+        function tzTime(date) {
+          return new Intl.DateTimeFormat("ru-RU", {
+            timeZone: TZ,
+            hour: "2-digit",
+            minute: "2-digit",
+            hourCycle: "h23",
+          }).format(date);
+        }
+
+        function timeToMinutes(value) {
+          const [h, m] = value.split(":").map(Number);
+          return h * 60 + m;
+        }
+
+        function minutesToTime(value) {
+          const normalized = ((value % 1440) + 1440) % 1440;
+          const h = Math.floor(normalized / 60);
+          const m = normalized % 60;
+          return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+        }
+
+        function addMinutes(time, amount) {
+          return minutesToTime(timeToMinutes(time) + amount);
+        }
+
+        function subtractMinutes(time, amount) {
+          return minutesToTime(timeToMinutes(time) - amount);
+        }
+
+        function toWeekStart(date) {
+          const local = new Date(date);
+          const day = (local.getDay() + 6) % 7;
+          local.setHours(0, 0, 0, 0);
+          local.setDate(local.getDate() - day);
+          return local;
+        }
+
+        function getWeekKey(date = nowInTz()) {
+          const local = toWeekStart(date);
+          return `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
+        }
+
+        function weekDateFromKey(key) {
+          const [y, m, d] = key.split("-").map(Number);
+          return new Date(y, m - 1, d, 0, 0, 0, 0);
+        }
+
+        function sundayLockPassed(weekKey, now = nowInTz()) {
+          const weekStart = weekDateFromKey(weekKey);
+          const lockPoint = new Date(weekStart);
+          lockPoint.setDate(lockPoint.getDate() + 6);
+          lockPoint.setHours(23, 59, 0, 0);
+          return now >= lockPoint;
+        }
+
+        function chelyabinskWeekday(date = nowInTz()) {
+          return (date.getDay() + 6) % 7;
+        }
+
+        function getAutoWeekType(now, anchorDate) {
+          const anchor = new Date(anchorDate);
+          const currentWeekStart = toWeekStart(now);
+          const anchorWeekStart = toWeekStart(anchor);
+          const diffMs = currentWeekStart.getTime() - anchorWeekStart.getTime();
+          const weekShift = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+          return Math.abs(weekShift) % 2 === 0 ? "week1" : "week2";
+        }
+
+        function getRotatedRecipe(source, index) {
+          return source[((index % source.length) + source.length) % source.length];
+        }
+
+        function toggleWeekType(weekType) {
+          return weekType === "week1" ? "week2" : "week1";
+        }
+
+        function getNextDayFirstClassTime(schedule, mode, day, weekType) {
+          for (let shift = 1; shift <= 7; shift += 1) {
+            const dayIndex = (day + shift) % 7;
+            const weekShift = Math.floor((day + shift) / 7);
+            const weekByShift = weekShift % 2 === 0 ? weekType : toggleWeekType(weekType);
+            const entries = schedule
+              .filter((item) => {
+                if (item.mode !== mode || item.day !== dayIndex) return false;
+                if (mode === "school") return true;
+                return item.weekType === weekByShift;
+              })
+              .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+
+            if (entries.length > 0) {
+              return entries[0].start;
+            }
+          }
+          return null;
+        }
+
+        function getBedtimeFromNextClass(nextClassStart, prepLeadMinutes) {
+          if (!nextClassStart) return "23:30";
+
+          const wakeMinutes = timeToMinutes(nextClassStart) - prepLeadMinutes;
+          let sleepMinutes = wakeMinutes - 8 * 60;
+
+          if (sleepMinutes < 20 * 60) sleepMinutes += 1440;
+          sleepMinutes = Math.max(21 * 60, Math.min(24 * 60 + 30, sleepMinutes));
+          return minutesToTime(sleepMinutes);
+        }
+
+        function buildMealPlan(dayLessons, day, weekType, bedtime, prepLeadMinutes) {
+          const sorted = dayLessons.slice().sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+          const firstClass = sorted[0]?.start;
+          const wakeBySchedule = firstClass ? subtractMinutes(firstClass, prepLeadMinutes) : null;
+          const breakfastRecipe = getRotatedRecipe(BREAKFAST_RECIPES, day + (weekType === "week2" ? 2 : 0));
+          const breakfastTime = firstClass
+            ? minutesToTime(clampMinutes(timeToMinutes(wakeBySchedule ?? "07:00") + 8, timeToMinutes("05:40"), timeToMinutes("10:40")))
+            : "09:00";
+
+          const plan = [
+            {
+              id: crypto.randomUUID(),
+              time: breakfastTime,
+              title: RECIPE_BOOK[breakfastRecipe].title,
+              note: firstClass ? "Быстрый прием дома перед началом дня" : "Плотный домашний завтрак",
+              recipeKey: breakfastRecipe,
             },
+          ];
+
+          let snackIndex = 0;
+          for (let i = 0; i < sorted.length - 1; i += 1) {
+            const current = sorted[i];
+            const next = sorted[i + 1];
+            const gap = timeToMinutes(next.start) - timeToMinutes(current.end);
+            if (gap >= 30) {
+              const snackKey = getRotatedRecipe(BREAK_SNACK_RECIPES, snackIndex + day);
+              snackIndex += 1;
+              plan.push({
+                id: crypto.randomUUID(),
+                time: addMinutes(current.end, 10),
+                title: RECIPE_BOOK[snackKey].title,
+                note: "Перерыв между занятиями: берется рядом с учебой, без готовки",
+                recipeKey: snackKey,
+              });
+            }
+          }
+
+          if (sorted.length > 0 && !plan.some((entry) => BREAK_SNACK_RECIPES.includes(entry.recipeKey))) {
+            const defaultSnack = getRotatedRecipe(BREAK_SNACK_RECIPES, day + 3);
+            plan.push({
+              id: crypto.randomUUID(),
+              time: firstClass ? addMinutes(firstClass, 170) : "11:30",
+              title: RECIPE_BOOK[defaultSnack].title,
+              note: "Дополнительный калорийный прием в середине дня",
+              recipeKey: defaultSnack,
+            });
+          }
+
+          const mainRecipe = getRotatedRecipe(weekType === "week1" ? MAIN_RECIPES_WEEK1 : MAIN_RECIPES_WEEK2, day + sorted.length);
+          const lastEnd = sorted[sorted.length - 1]?.end ?? "17:30";
+          plan.push({
+            id: crypto.randomUUID(),
+            time: firstClass ? addMinutes(lastEnd, 85) : "18:30",
+            title: RECIPE_BOOK[mainRecipe].title,
+            note: "Основной домашний прием пищи на набор массы",
+            recipeKey: mainRecipe,
           });
-        } else {
-          const fresh = {
-            ...localState,
+
+          const lateMealTime = minutesToTime(clampMinutes(timeToMinutes(subtractMinutes(bedtime, 75)), timeToMinutes("20:20"), timeToMinutes("23:30")));
+          const lateRecipe = getRotatedRecipe(LATE_RECIPES, day + (weekType === "week2" ? 1 : 0));
+          plan.push({
+            id: crypto.randomUUID(),
+            time: lateMealTime,
+            title: RECIPE_BOOK[lateRecipe].title,
+            note: "Спокойный прием перед сном для добора калорий",
+            recipeKey: lateRecipe,
+          });
+
+          if (!firstClass) {
+            const homeLunch = getRotatedRecipe(MAIN_RECIPES_WEEK1, day + 4);
+            const homeSnack = getRotatedRecipe(BREAK_SNACK_RECIPES, day + 2);
+            plan.unshift(
+              {
+                id: crypto.randomUUID(),
+                time: "13:20",
+                title: RECIPE_BOOK[homeLunch].title,
+                note: "Обед дома",
+                recipeKey: homeLunch,
+              },
+              {
+                id: crypto.randomUUID(),
+                time: "16:40",
+                title: RECIPE_BOOK[homeSnack].title,
+                note: "Перекус между делами",
+                recipeKey: homeSnack,
+              }
+            );
+          }
+
+          return plan.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+        }
+
+        function createDefaultState() {
+          const weekKey = getWeekKey();
+          return {
             profile: {
-              telegramId: identity.telegramId,
-              telegramUsername: identity.telegramUsername,
-              displayName: identity.displayName,
+              telegramId: "",
+              telegramUsername: "",
+              displayName: "Гость",
+            },
+            vault: {
+              balance: 0,
+              target: 30000,
+              lastPaidAt: null,
+            },
+            study: {
+              mode: "university",
+              absenceLimit: 20,
+              fallbackFirstClass: "08:00",
+              prepLeadMinutes: 120,
+              weekMode: "auto",
+              anchorDate: "2026-04-05",
+            },
+            schedule: USER_TEMPLATE_SCHEDULE,
+            planning: {
+              activeWeekKey: weekKey,
+            },
+            tasks: [
+              { id: crypto.randomUUID(), title: "ДЗ по менеджменту", type: "homework", status: "todo", weekKey, locked: false },
+              { id: crypto.randomUUID(), title: "Заказ на FunPay", type: "freelance", status: "doing", weekKey, locked: false },
+            ],
+            timeline: [
+              { id: crypto.randomUUID(), title: "ДЗ", type: "homework", start: 18, end: 20, weekKey, locked: false },
+              { id: crypto.randomUUID(), title: "Фриланс", type: "freelance", start: 20, end: 22, weekKey, locked: false },
+              { id: crypto.randomUUID(), title: "Отдых", type: "rest", start: 22, end: 24, weekKey, locked: false },
+            ],
+            alarm: {
+              enabled: false,
+              time: "06:30",
+              autoFromSchedule: true,
+              awakeConfirmedAt: null,
+            },
+            xp: {
+              points: 0,
+              spent: 0,
+              lastDailyClaim: null,
             },
           };
-          await setDoc(ref, { state: fresh, updatedAt: Date.now() });
-          setData(fresh);
         }
-        setSyncLabel("Firebase online");
-      } catch {
-        setData(localState);
-        setSyncLabel("Firebase error -> local backup");
-      } finally {
-        setLoaded(true);
-      }
-    };
 
-    void bootstrap();
-  }, [identity.docId, identity.displayName, identity.telegramId, identity.telegramUsername]);
+        function normalizeState(input) {
+          const active = input.planning.activeWeekKey || getWeekKey();
+          const rolledWeek = sundayLockPassed(active)
+            ? getWeekKey(new Date(weekDateFromKey(active).getTime() + 7 * 24 * 60 * 60 * 1000))
+            : active;
 
-  useEffect(() => {
-    if (!loaded) return;
-    localStorage.setItem("focus-vault-local-data", JSON.stringify(data));
-    if (!db) return;
-    void setDoc(doc(db, "focusVault", identity.docId), { state: data, updatedAt: Date.now() }, { merge: true });
-  }, [data, loaded, identity.docId]);
+          return {
+            ...input,
+            planning: { activeWeekKey: rolledWeek },
+            tasks: input.tasks.map((task) => ({ ...task, locked: task.weekKey !== rolledWeek })),
+            timeline: input.timeline.map((item) => ({ ...item, locked: item.weekKey !== rolledWeek })),
+          };
+        }
 
-  useEffect(() => {
-    if (!alarmTriggered) return;
-    if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]);
-    const loop = setInterval(() => {
-      if (navigator.vibrate) navigator.vibrate([260, 80, 260]);
-    }, 4500);
-    return () => clearInterval(loop);
-  }, [alarmTriggered]);
+        function hydrateState(raw) {
+          const fallback = createDefaultState();
+          if (!raw || typeof raw !== "object") return fallback;
+          const incoming = raw;
+          const schedule = Array.isArray(incoming.schedule)
+            ? incoming.schedule.map((item) => ({
+                ...item,
+                mode: item.mode ?? (item.type === "lesson" ? "school" : "university"),
+                weekType: item.weekType ?? "week1",
+              }))
+            : fallback.schedule;
 
-  useEffect(() => {
-    if (!data.alarm.autoFromSchedule || !nextClassInfo) return;
-    if (data.alarm.time === wakeTime) return;
-    setData((prev) => {
-      if (!prev.alarm.autoFromSchedule || prev.alarm.time === wakeTime) return prev;
-      return { ...prev, alarm: { ...prev.alarm, time: wakeTime } };
-    });
-  }, [data.alarm.autoFromSchedule, data.alarm.time, nextClassInfo, wakeTime]);
+          return normalizeState({
+            ...fallback,
+            ...incoming,
+            profile: { ...fallback.profile, ...(incoming.profile ?? {}) },
+            vault: { ...fallback.vault, ...(incoming.vault ?? {}) },
+            study: { ...fallback.study, ...(incoming.study ?? {}) },
+            planning: { ...fallback.planning, ...(incoming.planning ?? {}) },
+            alarm: { ...fallback.alarm, ...(incoming.alarm ?? {}) },
+            xp: { ...fallback.xp, ...(incoming.xp ?? {}) },
+            schedule,
+            tasks: Array.isArray(incoming.tasks) ? incoming.tasks : fallback.tasks,
+            timeline: Array.isArray(incoming.timeline) ? incoming.timeline : fallback.timeline,
+          });
+        }
 
-  const sendTelegramAlarm = async (kind: "test" | "auto") => {
-    const chatId = identity.telegramId;
-    if (!chatId) {
-      setBotStatus("Telegram user не определен. Открой приложение в Telegram WebApp.");
-      return false;
-    }
+        const App = () => {
+          const [data, setData] = useState(createDefaultState);
+          const [loaded, setLoaded] = useState(false);
+          const [splashDone, setSplashDone] = useState(false);
+          const [syncLabel, setSyncLabel] = useState("Boot");
+          const [tab, setTab] = useState("vault");
+          const [tick, setTick] = useState(new Date());
+          const [identity, setIdentity] = useState(() => ({
+            docId: ensureLocalUid(),
+            displayName: "Гость",
+            telegramUsername: "",
+            telegramId: "",
+            source: "local",
+          }));
 
-    if (!TELEGRAM_BOT_TOKEN) {
-      setBotStatus("Не задан VITE_TELEGRAM_BOT_TOKEN.");
-      return false;
-    }
+          const [vaultInput, setVaultInput] = useState(1000);
+          const [paymentWindow, setPaymentWindow] = useState(null);
+          const [activeRecipe, setActiveRecipe] = useState(null);
+          const [botStatus, setBotStatus] = useState("");
+          const alarmTelegramSentRef = useRef(false);
+          const [selectedDay, setSelectedDay] = useState(() => chelyabinskWeekday());
+          const [selectedStudyDay, setSelectedStudyDay] = useState(() => chelyabinskWeekday());
+          const [studyEditorOpen, setStudyEditorOpen] = useState(false);
+          const [scheduleDraft, setScheduleDraft] = useState({
+            weekType: "week1",
+            day: chelyabinskWeekday(),
+            start: "08:00",
+            end: "09:30",
+            title: "",
+            type: "pair",
+          });
+          const [newTask, setNewTask] = useState("");
+          const [newTaskType, setNewTaskType] = useState("homework");
+          const [timelineDraft, setTimelineDraft] = useState({ title: "", type: "homework", start: 18, end: 20 });
 
-    const textLines = kind === "test"
-      ? [
-          "[TEST] Будильник подключен.",
-          `Профиль: ${identity.telegramUsername || `id:${chatId}`}`,
-          `Время (Челябинск): ${currentTime}`,
-        ]
-      : [
-          "Подъем. Время вставать.",
-          `Будильник: ${data.alarm.time}`,
-          nextClassInfo ? `Ближайшее занятие: ${DAYS_FULL[nextClassInfo.dayIndex]} ${nextClassInfo.start}` : "",
-        ].filter(Boolean);
+          const nowChelyab = nowInTz();
+          const autoWeekType = getAutoWeekType(nowChelyab, data.study.anchorDate);
+          const activeWeekType = data.study.weekMode === "auto" ? autoWeekType : data.study.weekMode;
+          const currentTime = tzTime(tick);
 
-    try {
-      setBotStatus(kind === "test" ? "Отправляю тест в Telegram..." : "Отправляю сигнал будильника...");
-      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: textLines.join("\n"),
-          disable_web_page_preview: true,
-        }),
-      });
+          const scopedSchedule = useMemo(
+            () =>
+              data.schedule
+                .filter((item) => {
+                  if (item.mode !== data.study.mode) return false;
+                  if (data.study.mode === "school") return true;
+                  return item.weekType === activeWeekType;
+                })
+                .sort((a, b) => a.day - b.day || timeToMinutes(a.start) - timeToMinutes(b.start)),
+            [data.schedule, data.study.mode, activeWeekType]
+          );
 
-      const payload = await response.json();
-      if (!response.ok || !payload?.ok) {
-        setBotStatus("Ошибка Telegram API. Проверь токен, доступ и чат с ботом.");
-        return false;
-      }
+          const selectedDaySchedule = useMemo(
+            () => scopedSchedule.filter((item) => item.day === selectedDay).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
+            [scopedSchedule, selectedDay]
+          );
+          const selectedStudySchedule = useMemo(
+            () => scopedSchedule.filter((item) => item.day === selectedStudyDay).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
+            [scopedSchedule, selectedStudyDay]
+          );
 
-      setBotStatus(kind === "test" ? "Тест отправлен в Telegram." : "Сигнал будильника отправлен в Telegram.");
-      return true;
-    } catch {
-      setBotStatus("Не удалось отправить запрос к Telegram API.");
-      return false;
-    }
-  };
+          const selectedDayFirstClass = selectedDaySchedule[0]?.start ?? null;
+          const selectedDayWakeTime = selectedDayFirstClass ? subtractMinutes(selectedDayFirstClass, data.study.prepLeadMinutes) : null;
+          const selectedDayNextClass = useMemo(
+            () => getNextDayFirstClassTime(data.schedule, data.study.mode, selectedDay, activeWeekType),
+            [data.schedule, data.study.mode, selectedDay, activeWeekType]
+          );
+          const selectedDayBedtime = useMemo(() => getBedtimeFromNextClass(selectedDayNextClass, data.study.prepLeadMinutes), [selectedDayNextClass, data.study.prepLeadMinutes]);
 
-  useEffect(() => {
-    if (!alarmTriggered) {
-      alarmTelegramSentRef.current = false;
-      return;
-    }
-    if (alarmTelegramSentRef.current) return;
-    alarmTelegramSentRef.current = true;
-    void sendTelegramAlarm("auto");
-  }, [alarmTriggered]);
+          const nextClassInfo = useMemo(() => {
+            const nowMinutes = timeToMinutes(currentTime);
 
-  const addXP = (amount: number) => {
-    setData((prev) => ({ ...prev, xp: { ...prev.xp, points: prev.xp.points + amount } }));
-  };
+            for (let dayShift = 0; dayShift < 14; dayShift += 1) {
+              const date = new Date(nowChelyab);
+              date.setDate(nowChelyab.getDate() + dayShift);
+              const dayIndex = chelyabinskWeekday(date);
+              const weekTypeByDate = data.study.weekMode === "auto" ? getAutoWeekType(date, data.study.anchorDate) : data.study.weekMode;
 
-  const claimDailyFocus = () => {
-    const claimKey = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, dateStyle: "short" }).format(nowChelyab);
-    setData((prev) => {
-      if (prev.xp.lastDailyClaim === claimKey) return prev;
-      return {
-        ...prev,
-        xp: {
-          ...prev.xp,
-          points: prev.xp.points + REWARDS.dailyFocus,
-          lastDailyClaim: claimKey,
-        },
-      };
-    });
-  };
+              const daySchedule = data.schedule
+                .filter((item) => {
+                  if (item.mode !== data.study.mode) return false;
+                  if (item.day !== dayIndex) return false;
+                  if (data.study.mode === "school") return true;
+                  return item.weekType === weekTypeByDate;
+                })
+                .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
-  const cycleTaskStatus = (taskId: string) => {
-    setData((prev) => {
-      let reward = 0;
-      const tasks = prev.tasks.map((entry) => {
-        if (entry.id !== taskId || entry.locked) return entry;
-        const order: TaskStatus[] = ["todo", "doing", "done"];
-        const nextStatus = order[(order.indexOf(entry.status) + 1) % order.length];
-        if (entry.status !== "done" && nextStatus === "done") reward = REWARDS.taskDone;
-        return { ...entry, status: nextStatus };
-      });
+              if (daySchedule.length === 0) continue;
 
-      if (!reward) return { ...prev, tasks };
-      return {
-        ...prev,
-        tasks,
-        xp: { ...prev.xp, points: prev.xp.points + reward },
-      };
-    });
-  };
+              const classForDay =
+                dayShift === 0
+                  ? daySchedule.find((item) => timeToMinutes(item.start) > nowMinutes)
+                  : daySchedule[0];
 
-  const openPaymentWindow = () => {
-    const rounded = Math.round(vaultInput);
-    if (rounded <= 0) return;
-    setPaymentWindow({ amount: rounded, expiresAt: Date.now() + 10 * 60 * 1000 });
-  };
+              if (!classForDay) continue;
 
-  const confirmPayment = () => {
-    if (!paymentWindow) return;
-    setData((prev) => ({
-      ...prev,
-      vault: {
-        ...prev.vault,
-        balance: prev.vault.balance + paymentWindow.amount,
-        lastPaidAt: new Date().toISOString(),
-      },
-    }));
-    addXP(REWARDS.safeDeposit);
-    setPaymentWindow(null);
-  };
+              return {
+                dayShift,
+                dayIndex,
+                start: classForDay.start,
+                title: classForDay.title,
+              };
+            }
 
-  const addScheduleRow = () => {
-    if (!scheduleDraft.title.trim()) return;
-    if (timeToMinutes(scheduleDraft.end) <= timeToMinutes(scheduleDraft.start)) return;
-    setData((prev) => ({
-      ...prev,
-      schedule: [
-        ...prev.schedule,
-        {
-          id: crypto.randomUUID(),
-          mode: prev.study.mode,
-          weekType: prev.study.mode === "school" ? "week1" : scheduleDraft.weekType,
-          day: scheduleDraft.day,
-          start: scheduleDraft.start,
-          end: scheduleDraft.end,
-          title: scheduleDraft.title.trim(),
-          type: scheduleDraft.type,
-          skipped: false,
-        },
-      ],
-    }));
-    setScheduleDraft((prev) => ({ ...prev, title: "" }));
-  };
+            return null;
+          }, [data.schedule, data.study.mode, data.study.weekMode, data.study.anchorDate, currentTime, nowChelyab]);
 
-  const clearSchedule = () => {
-    if (!window.confirm("Точно очистить все пары/уроки?")) return;
-    setData((prev) => ({ ...prev, schedule: prev.schedule.filter((item) => item.mode !== prev.study.mode) }));
-  };
+          const wakeTime = nextClassInfo ? subtractMinutes(nextClassInfo.start, data.study.prepLeadMinutes) : data.alarm.time;
+          const sleepTime = subtractMinutes(wakeTime, 8 * 60);
+          const shouldSleep = Boolean(nextClassInfo) && timeToMinutes(currentTime) >= timeToMinutes(sleepTime);
+          const alarmTriggered = data.alarm.enabled && timeToMinutes(currentTime) >= timeToMinutes(data.alarm.time) && !data.alarm.awakeConfirmedAt;
 
-  const loadTemplateSchedule = () => {
-    setData((prev) => ({
-      ...prev,
-      schedule: [
-        ...prev.schedule.filter((item) => item.mode !== "university"),
-        ...USER_TEMPLATE_SCHEDULE.map((item) => ({ ...item, id: crypto.randomUUID(), skipped: false, mode: "university" as const })),
-      ],
-    }));
-  };
+          const mealPlan = useMemo(
+            () => buildMealPlan(selectedDaySchedule, selectedDay, activeWeekType, selectedDayBedtime, data.study.prepLeadMinutes),
+            [selectedDaySchedule, selectedDay, activeWeekType, selectedDayBedtime, data.study.prepLeadMinutes]
+          );
 
-  const addTask = () => {
-    const title = newTask.trim();
-    if (!title) return;
-    setData((prev) => ({
-      ...prev,
-      tasks: [...prev.tasks, { id: crypto.randomUUID(), title, type: newTaskType, status: "todo", weekKey: prev.planning.activeWeekKey, locked: false }],
-    }));
-    setNewTask("");
-  };
+          const paymentMs = paymentWindow ? Math.max(0, paymentWindow.expiresAt - tick.getTime()) : 0;
+          const paymentMinutes = Math.floor(paymentMs / 60000);
+          const paymentSeconds = Math.floor((paymentMs % 60000) / 1000);
+          const safeProgress = Math.min(100, Math.round((data.vault.balance / Math.max(1, data.vault.target)) * 100));
 
-  const addTimelineBlock = () => {
-    const title = timelineDraft.title.trim();
-    if (!title) return;
-    const start = Math.max(8, Math.min(23, timelineDraft.start));
-    const end = Math.max(start + 1, Math.min(24, timelineDraft.end));
-    setData((prev) => ({
-      ...prev,
-      timeline: [...prev.timeline, { id: crypto.randomUUID(), title, type: timelineDraft.type, start, end, weekKey: prev.planning.activeWeekKey, locked: false }],
-    }));
-    setTimelineDraft((prev) => ({ ...prev, title: "" }));
-  };
+          const weekSkipped = scopedSchedule.filter((item) => item.skipped).length;
+          const attendancePercent = Math.min(100, Math.round((weekSkipped / Math.max(1, data.study.absenceLimit)) * 100));
 
-  const tabs: Array<{ key: TabKey; label: string }> = [
-    { key: "vault", label: "Копилка" },
-    { key: "food", label: "Питание" },
-    { key: "study", label: "Учеба" },
-    { key: "planner", label: "Дела" },
-    { key: "sleep", label: "Сон" },
-    { key: "xp", label: "XP" },
-  ];
+          const weekKey = data.planning.activeWeekKey;
+          const currentTasks = data.tasks.filter((item) => item.weekKey === weekKey);
+          const currentTimeline = data.timeline.filter((item) => item.weekKey === weekKey);
+          const archiveWeeks = [...new Set(data.tasks.map((item) => item.weekKey).filter((item) => item !== weekKey))].sort().reverse();
 
-  if (!loaded || !splashDone) {
-    return (
-      <div className="app-shell app-loader">
-        <div className="loader-stage" aria-hidden="true">
-          <div className="loader-orbit" />
-          <div className="loader-ring" />
-          <div className="loader-scan" />
-          <div className="loader-crane">
-            <div className="loader-rail" />
-            <div className="loader-cabin" />
-            <div className="loader-line" />
-            <div className="loader-hook" />
-          </div>
-        </div>
-        <motion.p className="loader-text" initial={{ opacity: 0.45 }} animate={{ opacity: 1 }} transition={{ repeat: Infinity, repeatType: "reverse", duration: 1.1 }}>
-          Поднимаем систему и синхронизируем данные
-        </motion.p>
-      </div>
-    );
-  }
+          useEffect(() => {
+            const interval = setInterval(() => setTick(new Date()), 1000);
+            return () => clearInterval(interval);
+          }, []);
 
-  return (
-    <div className="app-shell">
-      <motion.div className="ambient ambient-left" animate={{ y: [-26, 14, -26], opacity: [0.25, 0.48, 0.25] }} transition={{ repeat: Infinity, duration: 12, ease: "easeInOut" }} />
-      <motion.div className="ambient ambient-right" animate={{ y: [24, -14, 24], opacity: [0.2, 0.44, 0.2] }} transition={{ repeat: Infinity, duration: 10, ease: "easeInOut" }} />
-      <motion.div className="ambient ambient-mid" animate={{ scale: [1, 1.08, 1], opacity: [0.22, 0.4, 0.22] }} transition={{ repeat: Infinity, duration: 8.5, ease: "easeInOut" }} />
-      <motion.div className="aurora-ribbon aurora-top" animate={{ x: ["-8%", "6%", "-8%"], opacity: [0.25, 0.5, 0.25] }} transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }} />
-      <motion.div className="aurora-ribbon aurora-bottom" animate={{ x: ["10%", "-8%", "10%"], opacity: [0.16, 0.38, 0.16] }} transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }} />
-      <motion.div className="wordmark-ghost" animate={{ opacity: [0.1, 0.2, 0.08, 0.18, 0.1] }} transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}>
-        ROUTINE
-      </motion.div>
+          useEffect(() => {
+            const timer = setTimeout(() => setSplashDone(true), 1400);
+            return () => clearTimeout(timer);
+          }, []);
 
-      <main className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-12 pt-6 md:px-8">
-        <section className="hero-surface">
-          <div className="hero-grid">
-            <div>
-              <h1 className="hero-title">Routine</h1>
-              <p className="hero-subtitle">Личный трекер с копилкой, расписанием, питанием, делами и сном. Время: Челябинск.</p>
-            </div>
-            <div className="hero-meta">
-              <p>{formatDate(nowChelyab)}</p>
-              <p className="hero-time">{currentTime}</p>
-              <p>{identity.displayName}</p>
-              <p>{syncLabel}</p>
-            </div>
-          </div>
+          useEffect(() => {
+            if (!paymentWindow || paymentMs > 0) return;
+            setPaymentWindow(null);
+          }, [paymentWindow, paymentMs]);
 
-          <nav className="tab-bar mt-6">
-            {tabs.map((item) => (
-              <button key={item.key} onClick={() => setTab(item.key)} className={`tab-btn ${tab === item.key ? "active" : ""}`}>
-                {tab === item.key && <motion.span layoutId="active-pill" className="tab-pill" transition={{ type: "spring", stiffness: 280, damping: 24 }} />}
-                <span className="relative z-10">{item.label}</span>
-              </button>
-            ))}
-          </nav>
-        </section>
+          useEffect(() => {
+            const tg = window.Telegram?.WebApp;
+            if (!tg) return;
 
-        <AnimatePresence mode="wait">
-          {tab === "vault" && (
-            <motion.section key="vault" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-              <h2 className="feature-title">Копилка</h2>
-              <p className="feature-text">Баланс: {data.vault.balance.toLocaleString("ru-RU")} ₽. Пополнение через окно оплаты на 10 минут.</p>
+            tg.ready();
+            tg.expand();
 
-              <div className="mt-5 grid gap-5 md:grid-cols-[1.1fr,1fr]">
-                <div className="space-y-3">
-                  <label className="label">Сумма пополнения</label>
-                  <input className="field" type="number" min={1} value={vaultInput} onChange={(e) => setVaultInput(Number(e.target.value) || 0)} />
-                  <label className="label">Цель накопления</label>
-                  <input
-                    className="field"
-                    type="number"
-                    min={1}
-                    value={data.vault.target}
-                    onChange={(e) => setData((prev) => ({ ...prev, vault: { ...prev.vault, target: Number(e.target.value) || 0 } }))}
-                  />
-                  <button className="primary-btn" onClick={openPaymentWindow}>Пополнить</button>
-                </div>
+            const user = tg.initDataUnsafe?.user;
+            if (!user?.id) return;
 
-                <div>
-                  <p className="metric-label">Текущий баланс</p>
-                  <p className="metric-value">{data.vault.balance.toLocaleString("ru-RU")} ₽</p>
-                  <div className="progress-line mt-3">
-                    <motion.div className="progress-fill" animate={{ width: `${safeProgress}%` }} />
+            const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || `ID ${user.id}`;
+            setIdentity({
+              docId: `tg-${user.id}`,
+              displayName: name,
+              telegramUsername: user.username ? `@${user.username}` : `id:${user.id}`,
+              telegramId: String(user.id),
+              source: "telegram",
+            });
+          }, []);
+
+          useEffect(() => {
+            const bootstrap = async () => {
+              setLoaded(false);
+              const localRaw = localStorage.getItem("focus-vault-local-data");
+              let localState = createDefaultState();
+
+              try {
+                localState = hydrateState(localRaw ? JSON.parse(localRaw) : createDefaultState());
+              } catch {
+                localState = createDefaultState();
+              }
+
+              if (!db) {
+                setData({
+                  ...localState,
+                  profile: {
+                    telegramId: identity.telegramId,
+                    telegramUsername: identity.telegramUsername,
+                    displayName: identity.displayName,
+                  },
+                });
+                setSyncLabel("Local mode");
+                setLoaded(true);
+                return;
+              }
+
+              try {
+                setSyncLabel("Firebase sync...");
+                const ref = doc(db, "focusVault", identity.docId);
+                const snap = await getDoc(ref);
+                if (snap.exists()) {
+                  const remote = hydrateState(snap.data().state);
+                  setData({
+                    ...remote,
+                    profile: {
+                      telegramId: identity.telegramId,
+                      telegramUsername: identity.telegramUsername,
+                      displayName: identity.displayName,
+                    },
+                  });
+                } else {
+                  const fresh = {
+                    ...localState,
+                    profile: {
+                      telegramId: identity.telegramId,
+                      telegramUsername: identity.telegramUsername,
+                      displayName: identity.displayName,
+                    },
+                  };
+                  await setDoc(ref, { state: fresh, updatedAt: Date.now() });
+                  setData(fresh);
+                }
+                setSyncLabel("Firebase online");
+              } catch {
+                setData(localState);
+                setSyncLabel("Firebase error -> local backup");
+              } finally {
+                setLoaded(true);
+              }
+            };
+
+            void bootstrap();
+          }, [identity.docId, identity.displayName, identity.telegramId, identity.telegramUsername]);
+
+          useEffect(() => {
+            if (!loaded) return;
+            localStorage.setItem("focus-vault-local-data", JSON.stringify(data));
+            if (!db) return;
+            void setDoc(doc(db, "focusVault", identity.docId), { state: data, updatedAt: Date.now() }, { merge: true });
+          }, [data, loaded, identity.docId]);
+
+          useEffect(() => {
+            if (!alarmTriggered) return;
+            if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]);
+            const loop = setInterval(() => {
+              if (navigator.vibrate) navigator.vibrate([260, 80, 260]);
+            }, 4500);
+            return () => clearInterval(loop);
+          }, [alarmTriggered]);
+
+          useEffect(() => {
+            if (!data.alarm.autoFromSchedule || !nextClassInfo) return;
+            if (data.alarm.time === wakeTime) return;
+            setData((prev) => {
+              if (!prev.alarm.autoFromSchedule || prev.alarm.time === wakeTime) return prev;
+              return { ...prev, alarm: { ...prev.alarm, time: wakeTime } };
+            });
+          }, [data.alarm.autoFromSchedule, data.alarm.time, nextClassInfo, wakeTime]);
+
+          const sendTelegramAlarm = async (kind) => {
+            const chatId = identity.telegramId;
+            if (!chatId) {
+              setBotStatus("Telegram user не определен. Открой приложение в Telegram WebApp.");
+              return false;
+            }
+
+            if (!TELEGRAM_BOT_TOKEN) {
+              setBotStatus("Не задан TELEGRAM_BOT_TOKEN в коде.");
+              return false;
+            }
+
+            const textLines = kind === "test"
+              ? [
+                  "[TEST] Будильник подключен.",
+                  `Профиль: ${identity.telegramUsername || `id:${chatId}`}`,
+                  `Время (Челябинск): ${currentTime}`,
+                ]
+              : [
+                  "Подъем. Время вставать.",
+                  `Будильник: ${data.alarm.time}`,
+                  nextClassInfo ? `Ближайшее занятие: ${DAYS_FULL[nextClassInfo.dayIndex]} ${nextClassInfo.start}` : "",
+                ].filter(Boolean);
+
+            try {
+              setBotStatus(kind === "test" ? "Отправляю тест в Telegram..." : "Отправляю сигнал будильника...");
+              const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  text: textLines.join("\n"),
+                  disable_web_page_preview: true,
+                }),
+              });
+
+              const payload = await response.json();
+              if (!response.ok || !payload?.ok) {
+                setBotStatus("Ошибка Telegram API. Проверь токен, доступ и чат с ботом.");
+                return false;
+              }
+
+              setBotStatus(kind === "test" ? "Тест отправлен в Telegram." : "Сигнал будильника отправлен в Telegram.");
+              return true;
+            } catch {
+              setBotStatus("Не удалось отправить запрос к Telegram API.");
+              return false;
+            }
+          };
+
+          useEffect(() => {
+            if (!alarmTriggered) {
+              alarmTelegramSentRef.current = false;
+              return;
+            }
+            if (alarmTelegramSentRef.current) return;
+            alarmTelegramSentRef.current = true;
+            void sendTelegramAlarm("auto");
+          }, [alarmTriggered]);
+
+          const addXP = (amount) => {
+            setData((prev) => ({ ...prev, xp: { ...prev.xp, points: prev.xp.points + amount } }));
+          };
+
+          const claimDailyFocus = () => {
+            const claimKey = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, dateStyle: "short" }).format(nowChelyab);
+            setData((prev) => {
+              if (prev.xp.lastDailyClaim === claimKey) return prev;
+              return {
+                ...prev,
+                xp: {
+                  ...prev.xp,
+                  points: prev.xp.points + REWARDS.dailyFocus,
+                  lastDailyClaim: claimKey,
+                },
+              };
+            });
+          };
+
+          const cycleTaskStatus = (taskId) => {
+            setData((prev) => {
+              let reward = 0;
+              const tasks = prev.tasks.map((entry) => {
+                if (entry.id !== taskId || entry.locked) return entry;
+                const order = ["todo", "doing", "done"];
+                const nextStatus = order[(order.indexOf(entry.status) + 1) % order.length];
+                if (entry.status !== "done" && nextStatus === "done") reward = REWARDS.taskDone;
+                return { ...entry, status: nextStatus };
+              });
+
+              if (!reward) return { ...prev, tasks };
+              return {
+                ...prev,
+                tasks,
+                xp: { ...prev.xp, points: prev.xp.points + reward },
+              };
+            });
+          };
+
+          const openPaymentWindow = () => {
+            const rounded = Math.round(vaultInput);
+            if (rounded <= 0) return;
+            setPaymentWindow({ amount: rounded, expiresAt: Date.now() + 10 * 60 * 1000 });
+          };
+
+          const confirmPayment = () => {
+            if (!paymentWindow) return;
+            setData((prev) => ({
+              ...prev,
+              vault: {
+                ...prev.vault,
+                balance: prev.vault.balance + paymentWindow.amount,
+                lastPaidAt: new Date().toISOString(),
+              },
+            }));
+            addXP(REWARDS.safeDeposit);
+            setPaymentWindow(null);
+          };
+
+          const addScheduleRow = () => {
+            if (!scheduleDraft.title.trim()) return;
+            if (timeToMinutes(scheduleDraft.end) <= timeToMinutes(scheduleDraft.start)) return;
+            setData((prev) => ({
+              ...prev,
+              schedule: [
+                ...prev.schedule,
+                {
+                  id: crypto.randomUUID(),
+                  mode: prev.study.mode,
+                  weekType: prev.study.mode === "school" ? "week1" : scheduleDraft.weekType,
+                  day: scheduleDraft.day,
+                  start: scheduleDraft.start,
+                  end: scheduleDraft.end,
+                  title: scheduleDraft.title.trim(),
+                  type: scheduleDraft.type,
+                  skipped: false,
+                },
+              ],
+            }));
+            setScheduleDraft((prev) => ({ ...prev, title: "" }));
+          };
+
+          const clearSchedule = () => {
+            if (!window.confirm("Точно очистить все пары/уроки?")) return;
+            setData((prev) => ({ ...prev, schedule: prev.schedule.filter((item) => item.mode !== prev.study.mode) }));
+          };
+
+          const loadTemplateSchedule = () => {
+            setData((prev) => ({
+              ...prev,
+              schedule: [
+                ...prev.schedule.filter((item) => item.mode !== "university"),
+                ...USER_TEMPLATE_SCHEDULE.map((item) => ({ ...item, id: crypto.randomUUID(), skipped: false, mode: "university" })),
+              ],
+            }));
+          };
+
+          const addTask = () => {
+            const title = newTask.trim();
+            if (!title) return;
+            setData((prev) => ({
+              ...prev,
+              tasks: [...prev.tasks, { id: crypto.randomUUID(), title, type: newTaskType, status: "todo", weekKey: prev.planning.activeWeekKey, locked: false }],
+            }));
+            setNewTask("");
+          };
+
+          const addTimelineBlock = () => {
+            const title = timelineDraft.title.trim();
+            if (!title) return;
+            const start = Math.max(8, Math.min(23, timelineDraft.start));
+            const end = Math.max(start + 1, Math.min(24, timelineDraft.end));
+            setData((prev) => ({
+              ...prev,
+              timeline: [...prev.timeline, { id: crypto.randomUUID(), title, type: timelineDraft.type, start, end, weekKey: prev.planning.activeWeekKey, locked: false }],
+            }));
+            setTimelineDraft((prev) => ({ ...prev, title: "" }));
+          };
+
+          const tabs = [
+            { key: "vault", label: "Копилка" },
+            { key: "food", label: "Питание" },
+            { key: "study", label: "Учеба" },
+            { key: "planner", label: "Дела" },
+            { key: "sleep", label: "Сон" },
+            { key: "xp", label: "XP" },
+          ];
+
+          if (!loaded || !splashDone) {
+            return (
+              <div className="app-shell app-loader">
+                <div className="loader-stage" aria-hidden="true">
+                  <div className="loader-orbit" />
+                  <div className="loader-ring" />
+                  <div className="loader-scan" />
+                  <div className="loader-crane">
+                    <div className="loader-rail" />
+                    <div className="loader-cabin" />
+                    <div className="loader-line" />
+                    <div className="loader-hook" />
                   </div>
-                  <p className="mt-3 text-sm text-black/60">Прогресс до цели: {safeProgress}%</p>
-                  <p className="mt-1 text-sm text-black/60">Реквизиты оплаты: {OZON_PHONE} (СБП, OZON Банк)</p>
-                  <p className="mt-1 text-sm text-black/60">Последняя оплата: {data.vault.lastPaidAt ? new Date(data.vault.lastPaidAt).toLocaleString("ru-RU") : "еще не было"}</p>
                 </div>
+                <motion.p className="loader-text" initial={{ opacity: 0.45 }} animate={{ opacity: 1 }} transition={{ repeat: Infinity, repeatType: "reverse", duration: 1.1 }}>
+                  Поднимаем систему и синхронизируем данные
+                </motion.p>
               </div>
-            </motion.section>
-          )}
+            );
+          }
 
-          {tab === "food" && (
-            <motion.section key="food" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-               <h2 className="feature-title">Питание на день</h2>
-               <p className="feature-text">План строится по расписанию выбранного дня и ориентирован на набор массы из доступных блюд.</p>
+          return (
+            <div className="app-shell">
+              <motion.div className="ambient ambient-left" animate={{ y: [-26, 14, -26], opacity: [0.25, 0.48, 0.25] }} transition={{ repeat: Infinity, duration: 12, ease: "easeInOut" }} />
+              <motion.div className="ambient ambient-right" animate={{ y: [24, -14, 24], opacity: [0.2, 0.44, 0.2] }} transition={{ repeat: Infinity, duration: 10, ease: "easeInOut" }} />
+              <motion.div className="ambient ambient-mid" animate={{ scale: [1, 1.08, 1], opacity: [0.22, 0.4, 0.22] }} transition={{ repeat: Infinity, duration: 8.5, ease: "easeInOut" }} />
+              <motion.div className="aurora-ribbon aurora-top" animate={{ x: ["-8%", "6%", "-8%"], opacity: [0.25, 0.5, 0.25] }} transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }} />
+              <motion.div className="aurora-ribbon aurora-bottom" animate={{ x: ["10%", "-8%", "10%"], opacity: [0.16, 0.38, 0.16] }} transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }} />
+              <motion.div className="wordmark-ghost" animate={{ opacity: [0.1, 0.2, 0.08, 0.18, 0.1] }} transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}>
+                ROUTINE
+              </motion.div>
 
-                <div className="mt-4 text-sm text-black/65">
-                  {DAYS_FULL[selectedDay]}: {selectedDayFirstClass ? `первое занятие ${selectedDayFirstClass}, подъем около ${selectedDayWakeTime}` : "занятий нет"}. Сон под следующий учебный день: отбой около {selectedDayBedtime}.
-                </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {DAYS_SHORT.map((day, idx) => (
-                  <button key={day} className={`secondary-btn ${selectedDay === idx ? "active" : ""}`} onClick={() => setSelectedDay(idx)}>
-                    {day}
-                  </button>
-                ))}
-              </div>
+              <main className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-12 pt-6 md:px-8">
+                <section className="hero-surface">
+                  <div className="hero-grid">
+                    <div>
+                      <h1 className="hero-title">Routine</h1>
+                      <p className="hero-subtitle">Личный трекер с копилкой, расписанием, питанием, делами и сном. Время: Челябинск.</p>
+                    </div>
+                    <div className="hero-meta">
+                      <p>{formatDate(nowChelyab)}</p>
+                      <p className="hero-time">{currentTime}</p>
+                      <p>{identity.displayName}</p>
+                      <p>{syncLabel}</p>
+                    </div>
+                  </div>
 
-              <div className="mt-5 grid gap-2">
-                {mealPlan.map((meal) => (
-                  <button key={meal.id} className="line-item line-item-btn" onClick={() => setActiveRecipe(meal.recipeKey)}>
-                    <span>{meal.time}</span>
-                    <span>{meal.title}</span>
-                    <span className="text-black/55">{meal.note}</span>
-                  </button>
-                ))}
-              </div>
-
-              {activeRecipe && (
-                <motion.div className="recipe-sheet mt-4" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-                  <p className="recipe-title">{RECIPE_BOOK[activeRecipe].title}</p>
-                  <p className="mt-1 text-sm text-black/65">Бюджет: {RECIPE_BOOK[activeRecipe].budget}</p>
-                  <p className="label mt-3">Ингредиенты</p>
-                  <div className="space-y-1 text-sm text-black/70">
-                    {RECIPE_BOOK[activeRecipe].ingredients.map((item) => (
-                      <div key={item}>- {item}</div>
+                  <nav className="tab-bar mt-6">
+                    {tabs.map((item) => (
+                      <button key={item.key} onClick={() => setTab(item.key)} className={`tab-btn ${tab === item.key ? "active" : ""}`}>
+                        {tab === item.key && <motion.span layoutId="active-pill" className="tab-pill" transition={{ type: "spring", stiffness: 280, damping: 24 }} />}
+                        <span className="relative z-10">{item.label}</span>
+                      </button>
                     ))}
-                  </div>
-                  <p className="label mt-3">Как приготовить</p>
-                  <div className="space-y-1 text-sm text-black/70">
-                    {RECIPE_BOOK[activeRecipe].steps.map((item, idx) => (
-                      <div key={item}>{idx + 1}. {item}</div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </motion.section>
-          )}
+                  </nav>
+                </section>
 
-          {tab === "study" && (
-            <motion.section key="study" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-               <h2 className="feature-title">Учеба</h2>
-               <p className="feature-text">Выбери день недели и смотри расписание только для него.</p>
+                <AnimatePresence mode="wait">
+                  {tab === "vault" && (
+                    <motion.section key="vault" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      <h2 className="feature-title">Копилка</h2>
+                      <p className="feature-text">Баланс: {data.vault.balance.toLocaleString("ru-RU")} ₽. Пополнение через окно оплаты на 10 минут.</p>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  className={`secondary-btn ${data.study.mode === "university" ? "active" : ""}`}
-                  onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, mode: "university", absenceLimit: 20 } }))}
-                >
-                  Универ
-                </button>
-                <button
-                  className={`secondary-btn ${data.study.mode === "school" ? "active" : ""}`}
-                  onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, mode: "school", absenceLimit: 40 } }))}
-                >
-                  Школа
-                </button>
-                {data.study.mode === "university" && (
-                  <>
-                    <button className={`secondary-btn ${data.study.weekMode === "auto" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "auto" } }))}>Автовыбор недели</button>
-                    <button className={`secondary-btn ${data.study.weekMode === "week1" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "week1" } }))}>Неделя 1</button>
-                    <button className={`secondary-btn ${data.study.weekMode === "week2" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "week2" } }))}>Неделя 2</button>
-                  </>
-                )}
-                 <button className={`secondary-btn ${studyEditorOpen ? "active" : ""}`} onClick={() => setStudyEditorOpen((prev) => !prev)}>{studyEditorOpen ? "Скрыть редактирование" : "Редактировать расписание"}</button>
-                {data.study.mode === "university" && <button className="secondary-btn" onClick={loadTemplateSchedule}>Загрузить твой шаблон</button>}
-                <button className="danger-btn" onClick={clearSchedule}>Стереть расписание</button>
-              </div>
+                      <div className="mt-5 grid gap-5 md:grid-cols-[1.1fr,1fr]">
+                        <div className="space-y-3">
+                          <label className="label">Сумма пополнения</label>
+                          <input className="field" type="number" min={1} value={vaultInput} onChange={(e) => setVaultInput(Number(e.target.value) || 0)} />
+                          <label className="label">Цель накопления</label>
+                          <input
+                            className="field"
+                            type="number"
+                            min={1}
+                            value={data.vault.target}
+                            onChange={(e) => setData((prev) => ({ ...prev, vault: { ...prev.vault, target: Number(e.target.value) || 0 } }))}
+                          />
+                          <button className="primary-btn mt-2" onClick={openPaymentWindow}>Пополнить</button>
+                        </div>
 
-               <div className="mt-3 flex flex-wrap gap-2">
-                 {DAYS_FULL.map((day, idx) => (
-                   <button key={day} className={`secondary-btn ${selectedStudyDay === idx ? "active" : ""}`} onClick={() => {
-                     setSelectedStudyDay(idx);
-                     setScheduleDraft((prev) => ({ ...prev, day: idx, weekType: activeWeekType }));
-                   }}>
-                     {day}
-                   </button>
-                 ))}
-               </div>
+                        <div>
+                          <p className="metric-label">Текущий баланс</p>
+                          <p className="metric-value">{data.vault.balance.toLocaleString("ru-RU")} ₽</p>
+                          <div className="progress-line mt-3">
+                            <motion.div className="progress-fill" animate={{ width: `${safeProgress}%` }} />
+                          </div>
+                          <p className="mt-3 text-sm text-slate-400">Прогресс до цели: {safeProgress}%</p>
+                          <p className="mt-1 text-sm text-slate-400">Реквизиты оплаты: {OZON_PHONE} (СБП, OZON Банк)</p>
+                          <p className="mt-1 text-sm text-slate-400">Последняя оплата: {data.vault.lastPaidAt ? new Date(data.vault.lastPaidAt).toLocaleString("ru-RU") : "еще не было"}</p>
+                        </div>
+                      </div>
+                    </motion.section>
+                  )}
 
-               <div className="mt-4 space-y-2">
-                 {selectedStudySchedule.length === 0 && <div className="line-item text-sm text-black/60">На этот день занятий нет.</div>}
-                 {selectedStudySchedule.map((item) => (
-                   <div key={item.id} className="line-item flex flex-wrap items-center justify-between gap-2">
-                     <div>
-                       <div className="text-sm text-black/60">{item.start} - {item.end}</div>
-                       <div className="font-medium">{item.title}</div>
-                     </div>
-                     <div className="flex gap-2">
-                       <button
-                         className={`secondary-btn tight ${item.skipped ? "active" : ""}`}
-                         onClick={() => {
-                           setData((prev) => ({ ...prev, schedule: prev.schedule.map((s) => (s.id === item.id ? { ...s, skipped: !s.skipped } : s)) }));
-                           if (item.skipped) addXP(REWARDS.classVisited);
-                         }}
-                       >
-                         {item.skipped ? "Прогул" : "Посещено"}
-                       </button>
-                       {studyEditorOpen && <button className="danger-btn tight" onClick={() => setData((prev) => ({ ...prev, schedule: prev.schedule.filter((s) => s.id !== item.id) }))}>Удалить</button>}
-                     </div>
-                   </div>
-                 ))}
-               </div>
+                  {tab === "food" && (
+                    <motion.section key="food" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      <h2 className="feature-title">Питание на день</h2>
+                      <p className="feature-text">План строится по расписанию выбранного дня и ориентирован на набор массы из доступных блюд.</p>
 
-                {studyEditorOpen && (
-                  <div className={`mt-4 grid gap-2 ${data.study.mode === "university" ? "md:grid-cols-[120px,120px,120px,1fr,120px,120px]" : "md:grid-cols-[120px,120px,1fr,120px,120px]"}`}>
-                    {data.study.mode === "university" && (
-                      <select className="field" value={scheduleDraft.weekType} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, weekType: e.target.value as WeekType }))}>
-                        <option value="week1">Неделя 1</option>
-                        <option value="week2">Неделя 2</option>
-                      </select>
-                    )}
-                   <input className="field" type="time" value={scheduleDraft.start} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, start: e.target.value }))} />
-                   <input className="field" type="time" value={scheduleDraft.end} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, end: e.target.value }))} />
-                   <input className="field" value={scheduleDraft.title} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, title: e.target.value }))} placeholder="Новая запись" />
-                   <select className="field" value={scheduleDraft.type} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, type: e.target.value as LessonType }))}>
-                     <option value="pair">Пара</option>
-                     <option value="lesson">Урок</option>
-                   </select>
-                   <button className="primary-btn" onClick={addScheduleRow}>Добавить</button>
-                 </div>
-               )}
+                      <div className="mt-4 text-sm text-slate-300">
+                        {DAYS_FULL[selectedDay]}: {selectedDayFirstClass ? `первое занятие ${selectedDayFirstClass}, подъем около ${selectedDayWakeTime}` : "занятий нет"}. Сон под следующий учебный день: отбой около {selectedDayBedtime}.
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {DAYS_SHORT.map((day, idx) => (
+                          <button key={day} className={`secondary-btn ${selectedDay === idx ? "active" : ""}`} onClick={() => setSelectedDay(idx)}>
+                            {day}
+                          </button>
+                        ))}
+                      </div>
 
-              <p className="mt-4 text-sm text-black/70">Риск прогулов (активная неделя): {weekSkipped} / {data.study.absenceLimit}</p>
-              <div className="progress-line mt-2">
-                <motion.div className={`h-full ${attendancePercent < 60 ? "bg-emerald-500" : attendancePercent < 85 ? "bg-yellow-500" : "bg-red-500"}`} animate={{ width: `${attendancePercent}%` }} />
-              </div>
-            </motion.section>
-          )}
+                      <div className="mt-5 grid gap-2">
+                        {mealPlan.map((meal) => (
+                          <button key={meal.id} className="line-item line-item-btn" onClick={() => setActiveRecipe(meal.recipeKey)}>
+                            <span className="font-mono text-indigo-300">{meal.time}</span>
+                            <span className="font-semibold">{meal.title}</span>
+                            <span className="text-slate-400 text-sm hidden md:inline">{meal.note}</span>
+                          </button>
+                        ))}
+                      </div>
 
-          {tab === "planner" && (
-            <motion.section key="planner" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-              <h2 className="feature-title">Дела</h2>
-              <p className="feature-text">Понятный список задач и блоки времени на день.</p>
+                      {activeRecipe && (
+                        <motion.div className="recipe-sheet mt-4" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                          <p className="recipe-title">{RECIPE_BOOK[activeRecipe].title}</p>
+                          <p className="mt-1 text-sm text-slate-400">Бюджет: {RECIPE_BOOK[activeRecipe].budget}</p>
+                          <p className="label mt-3">Ингредиенты</p>
+                          <div className="space-y-1 text-sm text-slate-300">
+                            {RECIPE_BOOK[activeRecipe].ingredients.map((item) => (
+                              <div key={item}>- {item}</div>
+                            ))}
+                          </div>
+                          <p className="label mt-3">Как приготовить</p>
+                          <div className="space-y-1 text-sm text-slate-300">
+                            {RECIPE_BOOK[activeRecipe].steps.map((item, idx) => (
+                              <div key={item}>{idx + 1}. {item}</div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </motion.section>
+                  )}
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <input className="field min-w-[220px] flex-1" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Новая задача" />
-                <select className="field w-[160px]" value={newTaskType} onChange={(e) => setNewTaskType(e.target.value as TaskType)}>
-                  <option value="homework">ДЗ</option>
-                  <option value="freelance">Фриланс</option>
-                  <option value="plan">План</option>
-                </select>
-                <button className="primary-btn" onClick={addTask}>Добавить</button>
-              </div>
+                  {tab === "study" && (
+                    <motion.section key="study" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      <h2 className="feature-title">Учеба</h2>
+                      <p className="feature-text">Выбери день недели и смотри расписание только для него.</p>
 
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
-                {([
-                  ["todo", "Запланировано"],
-                  ["doing", "В процессе"],
-                  ["done", "Сделано"],
-                ] as const).map(([status, label]) => (
-                  <div key={status} className="column-shell">
-                    <p className="column-title">{label}</p>
-                    <div className="mt-2 space-y-2">
-                      {currentTasks.filter((task) => task.status === status).map((task) => (
+                      <div className="mt-4 flex flex-wrap gap-2">
                         <button
-                          key={task.id}
-                          disabled={task.locked}
-                          className="task-chip"
-                          onClick={() => cycleTaskStatus(task.id)}
+                          className={`secondary-btn ${data.study.mode === "university" ? "active" : ""}`}
+                          onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, mode: "university", absenceLimit: 20 } }))}
                         >
-                          {task.title}
+                          Универ
                         </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                        <button
+                          className={`secondary-btn ${data.study.mode === "school" ? "active" : ""}`}
+                          onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, mode: "school", absenceLimit: 40 } }))}
+                        >
+                          Школа
+                        </button>
+                        {data.study.mode === "university" && (
+                          <>
+                            <button className={`secondary-btn ${data.study.weekMode === "auto" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "auto" } }))}>Автовыбор недели</button>
+                            <button className={`secondary-btn ${data.study.weekMode === "week1" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "week1" } }))}>Неделя 1</button>
+                            <button className={`secondary-btn ${data.study.weekMode === "week2" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "week2" } }))}>Неделя 2</button>
+                          </>
+                        )}
+                        <button className={`secondary-btn ${studyEditorOpen ? "active" : ""}`} onClick={() => setStudyEditorOpen((prev) => !prev)}>{studyEditorOpen ? "Скрыть редактирование" : "Редактировать расписание"}</button>
+                        {data.study.mode === "university" && <button className="secondary-btn" onClick={loadTemplateSchedule}>Загрузить твой шаблон</button>}
+                        <button className="danger-btn" onClick={clearSchedule}>Стереть расписание</button>
+                      </div>
 
-              <div className="mt-6">
-                <p className="label">План по времени</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <input className="field w-[210px]" value={timelineDraft.title} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, title: e.target.value }))} placeholder="Блок времени" />
-                  <select className="field w-[150px]" value={timelineDraft.type} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, type: e.target.value as TimelineType }))}>
-                    <option value="homework">ДЗ</option>
-                    <option value="freelance">Фриланс</option>
-                    <option value="rest">Отдых</option>
-                  </select>
-                  <input className="field w-[100px]" type="number" min={8} max={23} value={timelineDraft.start} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, start: Number(e.target.value) || 8 }))} />
-                  <input className="field w-[100px]" type="number" min={9} max={24} value={timelineDraft.end} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, end: Number(e.target.value) || 9 }))} />
-                  <button className="primary-btn" onClick={addTimelineBlock}>Добавить блок</button>
-                </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {DAYS_FULL.map((day, idx) => (
+                          <button key={day} className={`secondary-btn ${selectedStudyDay === idx ? "active" : ""}`} onClick={() => {
+                            setSelectedStudyDay(idx);
+                            setScheduleDraft((prev) => ({ ...prev, day: idx, weekType: activeWeekType }));
+                          }}>
+                            {day}
+                          </button>
+                        ))}
+                      </div>
 
-                <div className="time-axis mt-3">
-                  {Array.from({ length: 9 }).map((_, idx) => (
-                    <span key={idx}>{String(8 + idx * 2).padStart(2, "0")}:00</span>
-                  ))}
-                </div>
-                <div className="mt-3 grid grid-cols-12 gap-2">
-                  {currentTimeline.map((item) => (
-                    <div key={item.id} className={`timeline-block ${TIMELINE_STYLE[item.type]}`} style={{ gridColumn: `${Math.max(1, item.start - 7)} / ${Math.min(13, item.end - 7)}` }}>
-                      {item.title} {item.start}:00-{item.end}:00
-                    </div>
-                  ))}
-                </div>
-              </div>
+                      <div className="mt-4 space-y-2">
+                        {selectedStudySchedule.length === 0 && <div className="line-item text-sm text-slate-400">На этот день занятий нет.</div>}
+                        {selectedStudySchedule.map((item) => (
+                          <div key={item.id} className="line-item flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-sm text-slate-400 font-mono mb-1">{item.start} - {item.end}</div>
+                              <div className="font-medium text-lg">{item.title}</div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                className={`secondary-btn tight ${item.skipped ? "active" : ""}`}
+                                onClick={() => {
+                                  setData((prev) => ({ ...prev, schedule: prev.schedule.map((s) => (s.id === item.id ? { ...s, skipped: !s.skipped } : s)) }));
+                                  if (item.skipped) addXP(REWARDS.classVisited);
+                                }}
+                              >
+                                {item.skipped ? "Прогул" : "Посещено"}
+                              </button>
+                              {studyEditorOpen && <button className="danger-btn tight" onClick={() => setData((prev) => ({ ...prev, schedule: prev.schedule.filter((s) => s.id !== item.id) }))}>Удалить</button>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
 
-              {archiveWeeks.length > 0 && <p className="mt-4 text-xs text-black/50">Архив недель (locked): {archiveWeeks.join(", ")}</p>}
-            </motion.section>
-          )}
+                      {studyEditorOpen && (
+                        <div className={`mt-4 grid gap-2 ${data.study.mode === "university" ? "md:grid-cols-[120px,120px,120px,1fr,120px,120px]" : "md:grid-cols-[120px,120px,1fr,120px,120px]"}`}>
+                          {data.study.mode === "university" && (
+                            <select className="field" value={scheduleDraft.weekType} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, weekType: e.target.value }))}>
+                              <option value="week1">Неделя 1</option>
+                              <option value="week2">Неделя 2</option>
+                            </select>
+                          )}
+                          <input className="field" type="time" value={scheduleDraft.start} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, start: e.target.value }))} />
+                          <input className="field" type="time" value={scheduleDraft.end} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, end: e.target.value }))} />
+                          <input className="field" value={scheduleDraft.title} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, title: e.target.value }))} placeholder="Новая запись" />
+                          <select className="field" value={scheduleDraft.type} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, type: e.target.value }))}>
+                            <option value="pair">Пара</option>
+                            <option value="lesson">Урок</option>
+                          </select>
+                          <button className="primary-btn" onClick={addScheduleRow}>Добавить</button>
+                        </div>
+                      )}
 
-          {tab === "sleep" && (
-            <motion.section key="sleep" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-               <h2 className="feature-title">Сон и будильник</h2>
-               <p className="feature-text">
-                 {nextClassInfo
-                   ? `Ближайшее занятие: ${DAYS_FULL[nextClassInfo.dayIndex]} в ${nextClassInfo.start}. Подъем: ${wakeTime}. Рекомендуемый отбой: ${sleepTime}.`
-                   : "В расписании нет занятий. Укажи их в разделе Учеба, чтобы расчет сна стал точным."}
-               </p>
+                      <p className="mt-4 text-sm text-slate-300">Риск прогулов (активная неделя): <span className="font-bold">{weekSkipped} / {data.study.absenceLimit}</span></p>
+                      <div className="progress-line mt-2">
+                        <motion.div className={`h-full ${attendancePercent < 60 ? "bg-emerald-500" : attendancePercent < 85 ? "bg-yellow-500" : "bg-red-500"}`} animate={{ width: `${attendancePercent}%` }} />
+                      </div>
+                    </motion.section>
+                  )}
 
-              <div className={`sleep-alert ${shouldSleep ? "late" : "ok"}`}>
-                {shouldSleep
-                  ? `Сейчас ${currentTime}. Чтобы встать к ${wakeTime}, лучше уже ложиться.`
-                  : `Сейчас ${currentTime}. До сна по графику еще есть время.`}
-              </div>
+                  {tab === "planner" && (
+                    <motion.section key="planner" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      <h2 className="feature-title">Дела</h2>
+                      <p className="feature-text">Понятный список задач и блоки времени на день.</p>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button className="primary-btn" onClick={() => addXP(REWARDS.sleepOnTime)}>Лег вовремя (+{REWARDS.sleepOnTime} XP)</button>
-                <select
-                  className="field w-[210px]"
-                  value={data.study.prepLeadMinutes}
-                  onChange={(e) =>
-                    setData((prev) => ({
-                      ...prev,
-                      study: { ...prev.study, prepLeadMinutes: Number(e.target.value) || 120 },
-                    }))
-                  }
-                >
-                  <option value={100}>Запас до занятия: 1ч 40м</option>
-                  <option value={110}>Запас до занятия: 1ч 50м</option>
-                  <option value={120}>Запас до занятия: 2ч 00м</option>
-                  <option value={130}>Запас до занятия: 2ч 10м</option>
-                </select>
-                <input
-                  className="field w-[170px]"
-                  type="time"
-                  value={data.alarm.time}
-                  onChange={(e) =>
-                    setData((prev) => ({ ...prev, alarm: { ...prev.alarm, time: e.target.value, autoFromSchedule: false, awakeConfirmedAt: null } }))
-                  }
-                />
-                <button
-                  className={`secondary-btn ${data.alarm.autoFromSchedule ? "active" : ""}`}
-                  onClick={() =>
-                    setData((prev) => ({
-                      ...prev,
-                      alarm: {
-                        ...prev.alarm,
-                        autoFromSchedule: !prev.alarm.autoFromSchedule,
-                        time: !prev.alarm.autoFromSchedule && nextClassInfo ? wakeTime : prev.alarm.time,
-                        awakeConfirmedAt: null,
-                      },
-                    }))
-                  }
-                >
-                  {data.alarm.autoFromSchedule ? "Авто от расписания" : "Ручной будильник"}
-                </button>
-                <button className={`secondary-btn ${data.alarm.enabled ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, enabled: !prev.alarm.enabled, awakeConfirmedAt: null } }))}>
-                  {data.alarm.enabled ? "Будильник включен" : "Будильник выключен"}
-                </button>
-              </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <input className="field min-w-[220px] flex-1" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Новая задача" />
+                        <select className="field w-[160px]" value={newTaskType} onChange={(e) => setNewTaskType(e.target.value)}>
+                          <option value="homework">ДЗ</option>
+                          <option value="freelance">Фриланс</option>
+                          <option value="plan">План</option>
+                        </select>
+                        <button className="primary-btn" onClick={addTask}>Добавить</button>
+                      </div>
 
-              <p className="mt-2 text-sm text-black/60">Будильник: {data.alarm.time}. {nextClassInfo ? `Ориентир по расписанию: ${wakeTime}.` : "Добавь занятия, чтобы авторасчет был точнее."}</p>
+                      <div className="mt-5 grid gap-4 md:grid-cols-3">
+                        {[
+                          ["todo", "Запланировано"],
+                          ["doing", "В процессе"],
+                          ["done", "Сделано"],
+                        ].map(([status, label]) => (
+                          <div key={status} className="column-shell">
+                            <p className="column-title">{label}</p>
+                            <div className="mt-2 space-y-2">
+                              {currentTasks.filter((task) => task.status === status).map((task) => (
+                                <button
+                                  key={task.id}
+                                  disabled={task.locked}
+                                  className="task-chip"
+                                  onClick={() => cycleTaskStatus(task.id)}
+                                >
+                                  {task.title}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
 
-              <p className="mt-3 text-sm text-black/60">Профиль: {identity.telegramUsername || identity.telegramId || "не определен"}. В Telegram WebApp пользователь определяется автоматически.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button className="secondary-btn" onClick={() => void sendTelegramAlarm("test")}>Тест кнопки будильника в Telegram</button>
-              </div>
-              <p className="mt-2 text-sm text-black/60">{botStatus || "Подсказка: для теста задайте VITE_TELEGRAM_BOT_TOKEN и откройте WebApp внутри Telegram."}</p>
+                      <div className="mt-8">
+                        <p className="label">План по времени</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <input className="field md:w-[210px]" value={timelineDraft.title} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, title: e.target.value }))} placeholder="Блок времени" />
+                          <select className="field w-[150px]" value={timelineDraft.type} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, type: e.target.value }))}>
+                            <option value="homework">ДЗ</option>
+                            <option value="freelance">Фриланс</option>
+                            <option value="rest">Отдых</option>
+                          </select>
+                          <input className="field w-[100px]" type="number" min={8} max={23} value={timelineDraft.start} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, start: Number(e.target.value) || 8 }))} />
+                          <input className="field w-[100px]" type="number" min={9} max={24} value={timelineDraft.end} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, end: Number(e.target.value) || 9 }))} />
+                          <button className="primary-btn" onClick={addTimelineBlock}>Добавить блок</button>
+                        </div>
 
-              {alarmTriggered && (
-                <motion.div className="alarm-overlay mt-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                  <p>Подъем. Если приложение свернуто, надежное оповещение остается через Telegram-бота.</p>
-                  <div className="mt-3 flex gap-2">
-                    <button className="primary-btn" onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, enabled: false, awakeConfirmedAt: new Date().toISOString() } }))}>Проснулся</button>
-                    <button className="secondary-btn" onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, time: addMinutes(prev.alarm.time, 10), awakeConfirmedAt: null } }))}>Отложить на 10 минут</button>
-                  </div>
-                </motion.div>
-              )}
-            </motion.section>
-          )}
+                        <div className="time-axis mt-5">
+                          {Array.from({ length: 9 }).map((_, idx) => (
+                            <span key={idx}>{String(8 + idx * 2).padStart(2, "0")}:00</span>
+                          ))}
+                        </div>
+                        <div className="mt-3 grid grid-cols-12 gap-2">
+                          {currentTimeline.map((item) => (
+                            <div key={item.id} className={`timeline-block ${TIMELINE_STYLE[item.type]}`} style={{ gridColumn: `${Math.max(1, item.start - 7)} / ${Math.min(13, item.end - 7)}` }}>
+                              {item.title} {item.start}:00-{item.end}:00
+                            </div>
+                          ))}
+                        </div>
+                      </div>
 
-          {tab === "xp" && (
-            <motion.section key="xp" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-              <h2 className="feature-title">XP</h2>
-              <p className="feature-text">XP начисляется за посещение, копилку, сон и закрытие задач.</p>
-              <p className="metric-value mt-3">{data.xp.points}</p>
-              <p className="metric-label">доступно XP</p>
+                      {archiveWeeks.length > 0 && <p className="mt-4 text-xs text-slate-500">Архив недель (locked): {archiveWeeks.join(", ")}</p>}
+                    </motion.section>
+                  )}
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button className="primary-btn" onClick={claimDailyFocus}>
-                  Закрыл день (+{REWARDS.dailyFocus} XP)
-                </button>
-              </div>
+                  {tab === "sleep" && (
+                    <motion.section key="sleep" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      <h2 className="feature-title">Сон и будильник</h2>
+                      <p className="feature-text">
+                        {nextClassInfo
+                          ? `Ближайшее занятие: ${DAYS_FULL[nextClassInfo.dayIndex]} в ${nextClassInfo.start}. Подъем: ${wakeTime}. Рекомендуемый отбой: ${sleepTime}.`
+                          : "В расписании нет занятий. Укажи их в разделе Учеба, чтобы расчет сна стал точным."}
+                      </p>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                {[
-                  [60, "1 час игры"],
-                  [90, "Серия сериала"],
-                  [140, "Полдня отдыха"],
-                ].map(([cost, title]) => (
-                  <button
-                    key={title}
-                    className="secondary-btn"
-                    onClick={() =>
-                      setData((prev) => {
-                        const value = Number(cost);
-                        if (prev.xp.points < value) return prev;
-                        return { ...prev, xp: { ...prev.xp, points: prev.xp.points - value, spent: prev.xp.spent + value } };
-                      })
-                    }
-                  >
-                    {title} - {cost} XP
-                  </button>
-                ))}
-              </div>
+                      <div className={`sleep-alert ${shouldSleep ? "late" : "ok"}`}>
+                        {shouldSleep
+                          ? `Сейчас ${currentTime}. Чтобы встать к ${wakeTime}, лучше уже ложиться.`
+                          : `Сейчас ${currentTime}. До сна по графику еще есть время.`}
+                      </div>
 
-              <p className="mt-4 text-sm text-black/60">Потрачено за все время: {data.xp.spent} XP</p>
-            </motion.section>
-          )}
-        </AnimatePresence>
-      </main>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button className="primary-btn" onClick={() => addXP(REWARDS.sleepOnTime)}>Лег вовремя (+{REWARDS.sleepOnTime} XP)</button>
+                        <select
+                          className="field w-[210px]"
+                          value={data.study.prepLeadMinutes}
+                          onChange={(e) =>
+                            setData((prev) => ({
+                              ...prev,
+                              study: { ...prev.study, prepLeadMinutes: Number(e.target.value) || 120 },
+                            }))
+                          }
+                        >
+                          <option value={100}>Запас до занятия: 1ч 40м</option>
+                          <option value={110}>Запас до занятия: 1ч 50м</option>
+                          <option value={120}>Запас до занятия: 2ч 00м</option>
+                          <option value={130}>Запас до занятия: 2ч 10м</option>
+                        </select>
+                        <input
+                          className="field w-[170px]"
+                          type="time"
+                          value={data.alarm.time}
+                          onChange={(e) =>
+                            setData((prev) => ({ ...prev, alarm: { ...prev.alarm, time: e.target.value, autoFromSchedule: false, awakeConfirmedAt: null } }))
+                          }
+                        />
+                        <button
+                          className={`secondary-btn ${data.alarm.autoFromSchedule ? "active" : ""}`}
+                          onClick={() =>
+                            setData((prev) => ({
+                              ...prev,
+                              alarm: {
+                                ...prev.alarm,
+                                autoFromSchedule: !prev.alarm.autoFromSchedule,
+                                time: !prev.alarm.autoFromSchedule && nextClassInfo ? wakeTime : prev.alarm.time,
+                                awakeConfirmedAt: null,
+                              },
+                            }))
+                          }
+                        >
+                          {data.alarm.autoFromSchedule ? "Авто от расписания" : "Ручной будильник"}
+                        </button>
+                        <button className={`secondary-btn ${data.alarm.enabled ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, enabled: !prev.alarm.enabled, awakeConfirmedAt: null } }))}>
+                          {data.alarm.enabled ? "Будильник включен" : "Будильник выключен"}
+                        </button>
+                      </div>
 
-      <AnimatePresence>
-        {paymentWindow && (
-          <motion.div className="payment-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="payment-window" initial={{ y: 16, opacity: 0, scale: 0.98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 12, opacity: 0 }}>
-              <p className="label">СБП перевод</p>
-              <p className="payment-amount">{paymentWindow.amount.toLocaleString("ru-RU")} ₽</p>
-              <p className="text-sm text-black/70">Переведи по номеру {OZON_PHONE} (OZON Банк).</p>
-              <p className="mt-2 text-sm text-black/70">Окно подтверждения: {String(paymentMinutes).padStart(2, "0")}:{String(paymentSeconds).padStart(2, "0")}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button className="primary-btn" disabled={paymentMs <= 0} onClick={confirmPayment}>Оплатил</button>
-                <button className="secondary-btn" onClick={() => setPaymentWindow(null)}>Отмена</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
+                      <p className="mt-3 text-sm text-slate-400">Будильник: <span className="font-bold text-white">{data.alarm.time}</span>. {nextClassInfo ? `Ориентир по расписанию: ${wakeTime}.` : "Добавь занятия, чтобы авторасчет был точнее."}</p>
+
+                      <p className="mt-4 text-sm text-slate-400">Профиль: {identity.telegramUsername || identity.telegramId || "не определен"}. В Telegram WebApp пользователь определяется автоматически.</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button className="secondary-btn" onClick={() => void sendTelegramAlarm("test")}>Тест кнопки будильника в Telegram</button>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-500">{botStatus || "Подсказка: для теста задайте TELEGRAM_BOT_TOKEN в коде и откройте WebApp внутри Telegram."}</p>
+
+                      {alarmTriggered && (
+                        <motion.div className="alarm-overlay mt-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                          <p className="font-bold text-lg">Подъем!</p>
+                          <p>Если приложение свернуто, надежное оповещение остается через Telegram-бота.</p>
+                          <div className="mt-4 flex gap-2">
+                            <button className="primary-btn !bg-yellow-600 hover:!bg-yellow-500 !text-white" onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, enabled: false, awakeConfirmedAt: new Date().toISOString() } }))}>Проснулся</button>
+                            <button className="secondary-btn !bg-black/20 !border-yellow-500/30 hover:!bg-black/40" onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, time: addMinutes(prev.alarm.time, 10), awakeConfirmedAt: null } }))}>Отложить на 10 минут</button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </motion.section>
+                  )}
+
+                  {tab === "xp" && (
+                    <motion.section key="xp" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+                      <h2 className="feature-title">Опыт (XP)</h2>
+                      <p className="feature-text">XP начисляется за посещение, копилку, сон и закрытие задач.</p>
+                      
+                      <div className="mt-6 flex gap-4 items-end">
+                          <div>
+                            <p className="metric-value">{data.xp.points}</p>
+                            <p className="metric-label mt-0">доступно XP</p>
+                          </div>
+                          <div>
+                            <p className="text-xl font-bold text-slate-400">{data.xp.spent}</p>
+                            <p className="metric-label mt-0 text-slate-500">потрачено за всё время</p>
+                          </div>
+                      </div>
+
+                      <div className="mt-6 flex flex-wrap gap-2">
+                        <button className="primary-btn" onClick={claimDailyFocus}>
+                          Закрыл день (+{REWARDS.dailyFocus} XP)
+                        </button>
+                      </div>
+
+                      <div className="mt-6">
+                          <p className="label mb-3">Потратить XP на отдых</p>
+                          <div className="flex flex-wrap gap-3">
+                            {[
+                              [60, "1 час игры"],
+                              [90, "Серия сериала"],
+                              [140, "Полдня отдыха"],
+                            ].map(([cost, title]) => (
+                              <button
+                                key={title}
+                                className="secondary-btn flex flex-col items-start gap-1"
+                                onClick={() =>
+                                  setData((prev) => {
+                                    const value = Number(cost);
+                                    if (prev.xp.points < value) return prev;
+                                    return { ...prev, xp: { ...prev.xp, points: prev.xp.points - value, spent: prev.xp.spent + value } };
+                                  })
+                                }
+                              >
+                                <span>{title}</span>
+                                <span className="text-xs text-indigo-300 font-mono">- {cost} XP</span>
+                              </button>
+                            ))}
+                          </div>
+                      </div>
+                    </motion.section>
+                  )}
+                </AnimatePresence>
+              </main>
+
+              <AnimatePresence>
+                {paymentWindow && (
+                  <motion.div className="payment-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    <motion.div className="payment-window" initial={{ y: 16, opacity: 0, scale: 0.98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 12, opacity: 0, scale: 0.98 }}>
+                      <p className="label">СБП перевод (симуляция)</p>
+                      <p className="payment-amount">{paymentWindow.amount.toLocaleString("ru-RU")} ₽</p>
+                      <p className="text-sm text-slate-400">Переведи по номеру <span className="font-bold text-white">{OZON_PHONE}</span> (OZON Банк).</p>
+                      <p className="mt-2 text-sm text-slate-400">Окно подтверждения: <span className="font-mono text-white">{String(paymentMinutes).padStart(2, "0")}:{String(paymentSeconds).padStart(2, "0")}</span></p>
+                      <div className="mt-6 flex flex-wrap gap-2">
+                        <button className="primary-btn" disabled={paymentMs <= 0} onClick={confirmPayment}>Оплатил</button>
+                        <button className="secondary-btn" onClick={() => setPaymentWindow(null)}>Отмена</button>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+</html>

@@ -1,838 +1,1361 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Life Manager OS</title>
-
-    <!-- Telegram WebApp SDK -->
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'system-ui', 'sans-serif'],
-                        mono: ['ui-monospace', 'SFMono-Regular', 'monospace'],
-                    },
-                    colors: {
-                        apple: {
-                            black: '#000000',
-                            dark: '#0a0a0a',
-                            panel: '#111111',
-                            gray: '#1c1c1e',
-                            lightGray: '#2c2c2e',
-                            muted: '#8e8e93',
-                            white: '#ffffff',
-                        }
-                    },
-                    animation: {
-                        'fade-in': 'fadeIn 0.4s ease-out forwards',
-                        'slide-up': 'slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards',
-                        'pop-in': 'popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.2) forwards',
-                        'splash-fade': 'fadeOut 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards',
-                    },
-                    keyframes: {
-                        fadeIn: {
-                            '0%': { opacity: '0' },
-                            '100%': { opacity: '1' }
-                        },
-                        slideUp: {
-                            '0%': { transform: 'translateY(20px)', opacity: '0' },
-                            '100%': { transform: 'translateY(0)', opacity: '1' }
-                        },
-                        popIn: {
-                            '0%': { transform: 'scale(0.95)', opacity: '0' },
-                            '100%': { transform: 'scale(1)', opacity: '1' }
-                        },
-                        fadeOut: {
-                            '0%': { opacity: '1', transform: 'scale(1)' },
-                            '100%': { opacity: '0', transform: 'scale(1.05)', visibility: 'hidden' }
-                        }
-                    }
-                }
-            }
-        }
-    </script>
-
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
-
-    <style>
-        body {
-            background-color: #000000;
-            color: #ffffff;
-            -webkit-font-smoothing: antialiased;
-            -webkit-tap-highlight-color: transparent;
-            overscroll-behavior-y: none;
-            padding-bottom: 120px;
-            letter-spacing: -0.02em;
-        }
-
-        ::-webkit-scrollbar { display: none; }
-        * { -ms-overflow-style: none; scrollbar-width: none; }
-
-        /* Premium Glassmorphism (B&W) */
-        .glass-panel {
-            background: rgba(25, 25, 25, 0.6);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-        }
-
-        .glass-nav {
-            background: rgba(15, 15, 15, 0.85);
-            backdrop-filter: blur(30px);
-            -webkit-backdrop-filter: blur(30px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
-        }
-
-        /* Inputs & Controls */
-        .apple-input {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 12px;
-            padding: 14px 16px;
-            color: white;
-            font-size: 16px;
-            transition: all 0.2s ease;
-            outline: none;
-        }
-        .apple-input:focus {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.3);
-        }
-        .apple-input::placeholder { color: #8e8e93; }
-
-        /* Buttons */
-        .btn-primary {
-            background: #ffffff;
-            color: #000000;
-            border-radius: 14px;
-            padding: 14px 24px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s;
-        }
-        .btn-primary:active { transform: scale(0.96); opacity: 0.8; }
-        
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: #ffffff;
-            border-radius: 14px;
-            padding: 14px 24px;
-            font-weight: 600;
-            transition: transform 0.2s, background 0.2s;
-        }
-        .btn-secondary:active { transform: scale(0.96); background: rgba(255, 255, 255, 0.15); }
-
-        /* Progress Bar */
-        .progress-track {
-            height: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 99px;
-            overflow: hidden;
-        }
-        .progress-fill {
-            height: 100%;
-            background: #ffffff;
-            border-radius: 99px;
-            transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        /* Checkbox */
-        .apple-checkbox {
-            appearance: none;
-            width: 22px; height: 22px;
-            border-radius: 50%;
-            border: 1.5px solid rgba(255, 255, 255, 0.3);
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer; transition: all 0.2s;
-            background: transparent;
-        }
-        .apple-checkbox:checked {
-            background: #ffffff; border-color: #ffffff;
-        }
-        .apple-checkbox:checked::after {
-            content: ''; width: 6px; height: 10px;
-            border: solid black; border-width: 0 2px 2px 0;
-            transform: rotate(45deg) translateY(-1px);
-        }
-
-        /* Segmented Control */
-        .segmented-control {
-            display: flex; background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 3px;
-        }
-        .segment-btn {
-            flex: 1; text-align: center; padding: 8px; font-size: 13px; font-weight: 600;
-            border-radius: 8px; color: #8e8e93; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .segment-btn.active { background: #ffffff; color: #000000; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-
-        /* Timeline */
-        .timeline-item { position: relative; padding-left: 24px; padding-bottom: 24px; }
-        .timeline-item::before {
-            content: ''; position: absolute; left: 0; top: 6px; width: 8px; height: 8px;
-            border-radius: 50%; background: #ffffff; box-shadow: 0 0 10px rgba(255,255,255,0.5);
-        }
-        .timeline-item:not(:last-child)::after {
-            content: ''; position: absolute; left: 3px; top: 18px; bottom: 0; width: 2px; background: rgba(255,255,255,0.1);
-        }
-        .timeline-item.done::before { background: rgba(255,255,255,0.3); box-shadow: none; }
-        .timeline-item.done .time-text { color: rgba(255,255,255,0.3); text-decoration: line-through;}
-
-        /* Views */
-        .view-section { display: none; }
-        .view-section.active { display: block; animation: fade-in 0.4s ease forwards; }
-
-        /* Modals */
-        .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000;
-            opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
-            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-            display: flex; align-items: flex-end; justify-content: center;
-        }
-        .modal-overlay.active { opacity: 1; pointer-events: auto; }
-        .modal-sheet {
-            background: #111111; border: 1px solid rgba(255,255,255,0.1);
-            border-bottom: none; border-radius: 32px 32px 0 0; width: 100%; max-width: 500px;
-            transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            padding: 24px; padding-bottom: calc(32px + env(safe-area-inset-bottom));
-        }
-        .modal-overlay.active .modal-sheet { transform: translateY(0); }
-
-        .line-through { text-decoration: line-through; opacity: 0.5; }
-        .icon-fix { display: inline-block; vertical-align: middle; }
-    </style>
-</head>
-<body>
-
-    <!-- SPLASH SCREEN -->
-    <div id="loader" class="fixed inset-0 z-[9999] bg-black flex flex-col items-center justify-center">
-        <div class="relative w-24 h-24 mb-8 flex items-center justify-center">
-            <div class="absolute inset-0 border-2 border-white/10 rounded-full"></div>
-            <div class="absolute inset-0 border-t-2 border-white rounded-full animate-spin"></div>
-            <i data-lucide="command" class="w-8 h-8 text-white animate-pulse"></i>
-        </div>
-        <h1 class="text-3xl font-black tracking-tighter text-white uppercase">MANAGER<span class="text-gray-500">.OS</span></h1>
-    </div>
-
-    <!-- HEADER -->
-    <header class="fixed top-0 left-0 right-0 glass-panel z-50 px-6 pt-4 pb-4 border-b-0 border-x-0 border-t-0" style="padding-top: max(16px, env(safe-area-inset-top));">
-        <div class="flex justify-between items-end">
-            <div>
-                <p id="header-date" class="text-[11px] font-bold text-apple-muted uppercase tracking-widest mb-1"></p>
-                <h1 id="header-title" class="text-3xl font-bold tracking-tight text-white leading-none">Сводка</h1>
-            </div>
-            <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center border border-white/20 overflow-hidden">
-                <img id="user-avatar" src="" class="w-full h-full object-cover" alt="Profile">
-            </div>
-        </div>
-    </header>
-
-    <!-- MAIN APP CONTENT -->
-    <main id="app-content" class="px-5 pt-32">
-        
-        <!-- 1. СВОДКА (Главная) -->
-        <section id="view-dashboard" class="view-section active space-y-5">
-            
-            <!-- Прогулы -->
-            <div class="glass-panel rounded-3xl p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><i data-lucide="activity" class="w-5 h-5 text-white"></i></div>
-                        <div>
-                            <h3 class="font-bold text-white text-lg">Статус посещений</h3>
-                            <p id="truancy-text" class="text-xs text-apple-muted">Всё под контролем</p>
-                        </div>
-                    </div>
-                    <span id="truancy-ratio" class="text-lg font-bold text-white font-mono">0<span class="text-sm text-apple-muted">/24</span></span>
-                </div>
-                <div class="progress-track">
-                    <div id="truancy-bar" class="progress-fill w-[0%]"></div>
-                </div>
-                <button onclick="app.markSkip()" class="w-full mt-5 bg-white/5 hover:bg-white/10 text-white font-semibold py-3 rounded-xl transition-colors border border-white/10 text-sm">Отметить пропуск</button>
-            </div>
-
-            <!-- Режим сна -->
-            <div class="glass-panel rounded-3xl p-6 relative overflow-hidden group">
-                <div class="absolute -right-6 -top-6 opacity-5 group-hover:opacity-10 transition-opacity"><i data-lucide="moon" class="w-40 h-40"></i></div>
-                <div class="relative z-10">
-                    <h3 class="font-bold text-white text-lg mb-1">Режим сна</h3>
-                    <p class="text-xs text-apple-muted mb-5">Умный расчет отбоя</p>
-                    
-                    <div class="space-y-4">
-                        <div class="flex items-center justify-between bg-black/40 p-4 rounded-2xl border border-white/5">
-                            <span class="text-sm font-medium text-gray-300">Подъем (первая пара):</span>
-                            <input type="time" id="sleep-target-time" value="08:00" class="bg-transparent text-xl font-bold text-white outline-none w-24 text-right" onchange="app.calculateSleep()">
-                        </div>
-                        <div class="flex items-center justify-between bg-black/40 p-4 rounded-2xl border border-white/5">
-                            <span class="text-sm font-medium text-gray-300">Сборы и дорога:</span>
-                            <select id="sleep-prep-time" class="bg-transparent text-sm font-bold text-white outline-none text-right appearance-none" onchange="app.calculateSleep()" dir="rtl">
-                                <option value="30" class="text-black">30 мин</option>
-                                <option value="60" selected class="text-black">1 час</option>
-                                <option value="90" class="text-black">1.5 часа</option>
-                            </select>
-                        </div>
-                        <div class="pt-2 flex justify-between items-end">
-                            <p class="text-xs text-apple-muted max-w-[60%]">Оптимальное время отбоя (8ч сна + 15м на засыпание):</p>
-                            <p id="sleep-result" class="text-4xl font-black text-white tracking-tighter">22:45</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Таймлайн -->
-            <div class="glass-panel rounded-3xl p-6">
-                <div class="flex justify-between items-center mb-6">
-                    <h3 class="font-bold text-white text-lg">Расписание дня</h3>
-                    <i data-lucide="clock" class="w-5 h-5 text-apple-muted"></i>
-                </div>
-                <div class="pl-2" id="dashboard-timeline">
-                    <!-- Заполняется JS -->
-                </div>
-            </div>
-        </section>
-
-        <!-- 2. ВЬЮХА: ПЛАНЫ И ЗАДАЧИ -->
-        <section id="view-schedule" class="view-section space-y-5">
-            <div class="segmented-control mb-4">
-                <button class="segment-btn active" onclick="app.switchTab('schedule', 'tasks', this)">Задачи на неделю</button>
-                <button class="segment-btn" onclick="app.switchTab('schedule', 'timetable', this)">Расписание пар</button>
-            </div>
-
-            <!-- Задачи -->
-            <div id="tab-tasks" class="space-y-4">
-                <div class="flex gap-3">
-                    <input type="text" id="new-task-input" class="apple-input flex-1" placeholder="Добавить задачу..." onkeypress="if(event.key === 'Enter') app.addTask()">
-                    <button onclick="app.addTask()" class="bg-white text-black w-14 rounded-xl flex items-center justify-center transition-transform active:scale-95">
-                        <i data-lucide="plus" class="w-6 h-6 icon-fix"></i>
-                    </button>
-                </div>
-
-                <div class="glass-panel rounded-2xl overflow-hidden" id="task-list">
-                    <!-- JS -->
-                </div>
-            </div>
-
-            <!-- Пары -->
-            <div id="tab-timetable" class="hidden space-y-4">
-                <div class="glass-panel rounded-2xl p-6 text-center text-apple-muted">
-                    <i data-lucide="calendar" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
-                    <p class="text-sm">Расписание пока не загружено.<br>Добавьте предметы в настройках.</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- 3. ВЬЮХА: КОПИЛКА -->
-        <section id="view-money" class="view-section space-y-5">
-            
-            <div class="glass-panel rounded-[32px] p-8 relative overflow-hidden flex flex-col items-center justify-center min-h-[240px] text-center border border-white/20">
-                <div class="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent"></div>
-                <p class="text-[10px] font-bold text-apple-muted uppercase tracking-[0.2em] mb-2 relative z-10">Сейф от лудомании</p>
-                <h2 id="piggy-balance" class="text-[56px] font-black text-white tracking-tighter leading-none mb-8 relative z-10">0 ₽</h2>
-                <button onclick="app.openDepositModal()" class="btn-primary w-full max-w-[200px] relative z-10 shadow-[0_0_20px_rgba(255,255,255,0.2)]">
-                    Пополнить
-                </button>
-            </div>
-
-            <div class="glass-panel rounded-3xl p-6">
-                <h3 class="font-bold text-white text-lg mb-4">История</h3>
-                <div id="piggy-history" class="space-y-1">
-                    <!-- JS -->
-                </div>
-            </div>
-        </section>
-
-        <!-- 4. ВЬЮХА: ПИТАНИЕ -->
-        <section id="view-food" class="view-section space-y-5">
-            <div class="segmented-control mb-4">
-                <button class="segment-btn active" onclick="app.switchTab('food', 'uni', this)">Учеба</button>
-                <button class="segment-btn" onclick="app.switchTab('food', 'home', this)">Дома</button>
-            </div>
-
-            <div id="tab-uni" class="space-y-4">
-                <div class="glass-panel rounded-3xl p-0 overflow-hidden group">
-                    <div class="h-32 bg-[#111] relative flex items-center justify-center overflow-hidden">
-                        <div class="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1606841262965-dc06e30eb49a?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-40 grayscale"></div>
-                        <h3 class="relative z-10 text-2xl font-black text-white tracking-tight">Выживание в К&Б</h3>
-                    </div>
-                    <div class="p-6">
-                        <p class="text-sm text-gray-300 mb-4 leading-relaxed">Быстрые и калорийные перекусы для набора массы между парами.</p>
-                        <ul class="text-sm text-gray-400 space-y-3">
-                            <li class="flex items-center gap-3"><div class="w-1.5 h-1.5 rounded-full bg-white"></div> Арахис (максимум ккал за копейки)</li>
-                            <li class="flex items-center gap-3"><div class="w-1.5 h-1.5 rounded-full bg-white"></div> Булочки с мясом/сыром</li>
-                            <li class="flex items-center gap-3"><div class="w-1.5 h-1.5 rounded-full bg-white"></div> Протеиновые батончики</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-
-            <div id="tab-home" class="hidden space-y-4">
-                <div class="glass-panel rounded-3xl p-0 overflow-hidden">
-                    <div class="h-32 bg-[#111] relative flex items-center justify-center overflow-hidden">
-                        <div class="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1612814894336-f0f1883e0cb9?auto=format&fit=crop&q=80')] bg-cover bg-center opacity-40 grayscale"></div>
-                        <h3 class="relative z-10 text-2xl font-black text-white tracking-tight">Ужин Студента</h3>
-                    </div>
-                    <div class="p-6">
-                        <div class="bg-white/5 rounded-xl p-4 mb-4 border border-white/10">
-                            <p class="text-xs font-bold text-white uppercase tracking-widest mb-1">Макароны с яйцами и колбасой</p>
-                            <p class="text-xs text-apple-muted">1 сковородка. 15 минут. Топ белка.</p>
-                        </div>
-                        <ol class="text-sm text-gray-300 space-y-4 font-medium">
-                            <li class="flex gap-3"><span class="text-white font-bold">1.</span> Обжарь нарезанную колбасу до корочки.</li>
-                            <li class="flex gap-3"><span class="text-white font-bold">2.</span> Засыпь сухие макароны, жарь 1 минуту.</li>
-                            <li class="flex gap-3"><span class="text-white font-bold">3.</span> Залей водой (чуть выше макарон), накрой крышкой.</li>
-                            <li class="flex gap-3"><span class="text-white font-bold">4.</span> Как вода выкипит, вбей 2 яйца и перемешай.</li>
-                        </ol>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- 5. ВЬЮХА: БУДИЛЬНИК -->
-        <section id="view-alarm" class="view-section space-y-5">
-            <div class="glass-panel rounded-3xl text-center py-12 px-6">
-                <i data-lucide="bell-ring" class="w-8 h-8 text-white mx-auto mb-4 opacity-50"></i>
-                <p class="text-xs font-bold text-apple-muted uppercase tracking-widest mb-2">Будильник</p>
-                <div class="text-[64px] font-light text-white tracking-tighter mb-2 leading-none">06:30</div>
-                <p class="text-xs font-bold text-white uppercase tracking-wide mb-10 px-3 py-1 bg-white/10 rounded-full inline-block">Активирован</p>
-                
-                <button class="btn-secondary w-full">Настроить время</button>
-            </div>
-            <p class="text-xs text-center text-apple-muted px-4 leading-relaxed">Будильник пришлет уведомление прямо в Telegram, так как фоновый звук в браузере заблокирован ОС.</p>
-        </section>
-
-    </main>
-
-    <!-- BOTTOM NAVIGATION -->
-    <nav class="fixed bottom-6 left-4 right-4 h-16 glass-nav rounded-2xl flex items-center justify-around z-40 px-2 shadow-2xl">
-        <button onclick="app.switchView('dashboard')" class="nav-btn flex flex-col items-center gap-1 p-2 text-white transition-colors" data-view="dashboard">
-            <i data-lucide="layout-dashboard" class="w-5 h-5"></i>
-            <span class="text-[9px] font-semibold tracking-wide">Сводка</span>
-        </button>
-        <button onclick="app.switchView('schedule')" class="nav-btn flex flex-col items-center gap-1 p-2 text-apple-muted hover:text-white transition-colors" data-view="schedule">
-            <i data-lucide="check-circle" class="w-5 h-5"></i>
-            <span class="text-[9px] font-semibold tracking-wide">Планы</span>
-        </button>
-        <button onclick="app.switchView('food')" class="nav-btn flex flex-col items-center gap-1 p-2 text-apple-muted hover:text-white transition-colors" data-view="food">
-            <i data-lucide="coffee" class="w-5 h-5"></i>
-            <span class="text-[9px] font-semibold tracking-wide">Питание</span>
-        </button>
-        <button onclick="app.switchView('money')" class="nav-btn flex flex-col items-center gap-1 p-2 text-apple-muted hover:text-white transition-colors" data-view="money">
-            <i data-lucide="wallet" class="w-5 h-5"></i>
-            <span class="text-[9px] font-semibold tracking-wide">Копилка</span>
-        </button>
-        <button onclick="app.switchView('alarm')" class="nav-btn flex flex-col items-center gap-1 p-2 text-apple-muted hover:text-white transition-colors" data-view="alarm">
-            <i data-lucide="bell" class="w-5 h-5"></i>
-            <span class="text-[9px] font-semibold tracking-wide">Будильник</span>
-        </button>
-    </nav>
-
-    <!-- MODAL: DEPOSIT -->
-    <div id="modal-deposit" class="modal-overlay">
-        <div class="modal-sheet">
-            <div class="modal-handle"></div>
-            <h2 class="text-2xl font-bold text-white mb-6 tracking-tight">Пополнение сейфа</h2>
-            
-            <div id="step-1">
-                <div class="mb-6">
-                    <input type="number" id="deposit-amount" placeholder="Сумма (₽)" class="apple-input text-xl font-bold text-center" autofocus>
-                </div>
-                <button onclick="app.startDepositTimer()" class="btn-primary w-full">Продолжить</button>
-            </div>
-
-            <div id="step-2" class="hidden">
-                <div class="bg-white/5 rounded-2xl p-6 text-center mb-6 border border-white/10">
-                    <p class="text-xs font-semibold text-apple-muted uppercase tracking-wider mb-2">Ожидание перевода</p>
-                    <div id="deposit-timer" class="text-5xl font-mono font-bold text-white mb-6 tracking-tighter">10:00</div>
-                    
-                    <div class="bg-black/50 rounded-xl p-4 text-left border border-white/5">
-                        <p class="text-[10px] text-apple-muted uppercase font-bold mb-1 tracking-widest">Перевод по СБП (Ozon Bank)</p>
-                        <div class="flex justify-between items-center">
-                            <p class="text-lg font-bold text-white font-mono tracking-wider">+7 952 508 1814</p>
-                            <button onclick="app.copyPhone()" class="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center text-white hover:bg-white/20 transition-colors"><i data-lucide="copy" class="w-4 h-4"></i></button>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="flex gap-3">
-                    <button onclick="app.closeModal('modal-deposit')" class="btn-secondary flex-1">Отмена</button>
-                    <button onclick="app.confirmDeposit()" class="btn-primary flex-1">Я оплатил</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TOAST -->
-    <div id="toast" class="fixed top-4 left-1/2 transform -translate-x-1/2 z-[2000] glass-panel px-5 py-3 rounded-full flex items-center gap-3 transition-all duration-300 opacity-0 translate-y-[-20px] pointer-events-none">
-        <i id="toast-icon" data-lucide="check-circle" class="w-4 h-4 text-white"></i>
-        <span id="toast-msg" class="text-sm font-semibold text-white">Успешно</span>
-    </div>
-
-    <!-- JAVASCRIPT -->
-    <script type="module">
-        window.app = {
-            state: {
-                balance: 0,
-                truancy: 0,
-                maxTruancy: 24,
-                history: [],
-                tasks: [
-                    { id: 1, text: "Доделать бота для магазина", done: false },
-                    { id: 2, text: "Сдать лабы по проге", done: false },
-                    { id: 3, text: "Закинуть деньги в копилку", done: true }
-                ]
-            },
-            timerInt: null,
-
-            init() {
-                const tg = window.Telegram?.WebApp;
-                if (tg) {
-                    tg.ready();
-                    tg.expand();
-                    tg.setHeaderColor('#000000');
-                    tg.setBackgroundColor('#000000');
-                    
-                    const user = tg.initDataUnsafe?.user;
-                    if (user) {
-                        document.getElementById('user-avatar').src = user.photo_url || `https://ui-avatars.com/api/?name=${user.first_name}&background=ffffff&color=000`;
-                    } else {
-                        document.getElementById('user-avatar').src = `https://ui-avatars.com/api/?name=Ivan&background=ffffff&color=000`;
-                    }
-                }
-
-                this.updateTime();
-                setInterval(() => this.updateTime(), 60000);
-                
-                this.loadData();
-                this.renderTasks();
-                this.calculateSleep();
-                this.renderTimeline();
-                
-                if(window.lucide) lucide.createIcons();
-
-                // Loading Animation
-                setTimeout(() => {
-                    const loader = document.getElementById('loader');
-                    loader.classList.add('animate-splash-fade');
-                    setTimeout(() => loader.style.display = 'none', 800);
-                }, 1200);
-            },
-
-            updateTime() {
-                const optsTime = { timeZone: 'Asia/Yekaterinburg', hour: '2-digit', minute: '2-digit' };
-                const optsDate = { timeZone: 'Asia/Yekaterinburg', weekday: 'long', day: 'numeric', month: 'long' };
-                const now = new Date();
-                
-                document.getElementById('header-time').innerText = now.toLocaleTimeString('ru-RU', optsTime);
-                document.getElementById('header-date').innerText = now.toLocaleDateString('ru-RU', optsDate);
-
-                const hour = parseInt(now.toLocaleTimeString('ru-RU', { timeZone: 'Asia/Yekaterinburg', hour: '2-digit' }));
-                let greeting = 'Добрый вечер';
-                if (hour >= 6 && hour < 12) greeting = 'Доброе утро';
-                else if (hour >= 12 && hour < 18) greeting = 'Добрый день';
-                
-                const views = {
-                    'dashboard': greeting,
-                    'schedule': 'Планы',
-                    'food': 'Питание',
-                    'money': 'Копилка',
-                    'alarm': 'Будильник'
-                };
-                
-                const currentView = document.querySelector('.nav-btn.text-white')?.dataset.view || 'dashboard';
-                document.getElementById('header-title').innerText = views[currentView];
-            },
-
-            switchView(viewId) {
-                document.querySelectorAll('.nav-btn').forEach(btn => {
-                    btn.classList.remove('text-white');
-                    btn.classList.add('text-apple-muted');
-                });
-                const activeBtn = document.querySelector(`.nav-btn[data-view="${viewId}"]`);
-                if(activeBtn) {
-                    activeBtn.classList.remove('text-apple-muted');
-                    activeBtn.classList.add('text-white');
-                }
-
-                document.querySelectorAll('.view-section').forEach(sec => {
-                    sec.classList.remove('active');
-                });
-                document.getElementById(`view-${viewId}`).classList.add('active');
-
-                this.updateTime();
-                window.scrollTo(0,0);
-            },
-
-            switchTab(view, tab, el) {
-                document.querySelectorAll(`#view-${view} .segment-btn`).forEach(b => b.classList.remove('active'));
-                el.classList.add('active');
-                
-                if (view === 'schedule') {
-                    document.getElementById('tab-tasks').style.display = tab === 'tasks' ? 'block' : 'none';
-                    document.getElementById('tab-timetable').style.display = tab === 'timetable' ? 'block' : 'none';
-                } else if (view === 'food') {
-                    document.getElementById('tab-uni').style.display = tab === 'uni' ? 'block' : 'none';
-                    document.getElementById('tab-home').style.display = tab === 'home' ? 'block' : 'none';
-                }
-            },
-
-            // --- TIMELINE ---
-            renderTimeline() {
-                const now = new Date();
-                const hour = parseInt(now.toLocaleTimeString('ru-RU', { timeZone: 'Asia/Yekaterinburg', hour: '2-digit' }));
-                
-                let html = '';
-                
-                // Простая логика определения текущего этапа дня
-                const schedule = [
-                    { time: "08:00 - 15:00", title: "Учеба / Пары", desc: "Университет, закрытие долгов", type: "work", start: 8, end: 15 },
-                    { time: "16:00 - 19:00", title: "Заказы FunPay", desc: "Работа за ПК", type: "work", start: 16, end: 19 },
-                    { time: "20:00 - 22:30", title: "Свободное время", desc: "Отдых, игры, ужин", type: "rest", start: 20, end: 23 }
-                ];
-
-                schedule.forEach(item => {
-                    let statusClass = '';
-                    if (hour >= item.end) statusClass = 'done'; // Прошло
-                    
-                    html += `
-                        <div class="timeline-item ${statusClass}">
-                            <span class="text-xs font-bold text-gray-400 time-text">${item.time}</span>
-                            <p class="text-sm font-bold text-white mt-0.5">${item.title}</p>
-                            <p class="text-xs text-apple-muted">${item.desc}</p>
-                        </div>
-                    `;
-                });
-
-                document.getElementById('dashboard-timeline').innerHTML = html;
-            },
-
-            // --- SLEEP ALGORITHM ---
-            calculateSleep() {
-                const targetTime = document.getElementById('sleep-target-time').value; 
-                const prepMinutes = parseInt(document.getElementById('sleep-prep-time').value); 
-                
-                if (!targetTime) return;
-
-                const [hours, minutes] = targetTime.split(':').map(Number);
-                
-                let wakeTotalMins = hours * 60 + minutes - prepMinutes;
-                if (wakeTotalMins < 0) wakeTotalMins += 24 * 60;
-                
-                let sleepTotalMins = wakeTotalMins - (8 * 60) - 15;
-                if (sleepTotalMins < 0) sleepTotalMins += 24 * 60;
-
-                const sleepH = Math.floor(sleepTotalMins / 60).toString().padStart(2, '0');
-                const sleepM = (sleepTotalMins % 60).toString().padStart(2, '0');
-
-                document.getElementById('sleep-result').innerText = `${sleepH}:${sleepM}`;
-            },
-
-            // --- TASKS (To-Do) ---
-            renderTasks() {
-                const list = document.getElementById('task-list');
-                if (this.state.tasks.length === 0) {
-                    list.innerHTML = '<div class="p-6 text-center text-sm text-apple-muted">Задач нет.</div>';
-                    return;
-                }
-
-                list.innerHTML = this.state.tasks.map(t => `
-                    <label class="ios-list-item cursor-pointer group border-b border-white/5">
-                        <span class="text-[15px] font-medium ${t.done ? 'line-through' : 'text-white'} transition-all">${t.text}</span>
-                        <input type="checkbox" class="apple-checkbox" ${t.done ? 'checked' : ''} onchange="app.toggleTask(${t.id})">
-                    </label>
-                `).join('');
-            },
-
-            addTask() {
-                const input = document.getElementById('new-task-input');
-                const text = input.value.trim();
-                if (!text) return;
-
-                this.state.tasks.unshift({ id: Date.now(), text, done: false });
-                input.value = '';
-                this.saveData();
-                this.renderTasks();
-                if(window.Telegram?.WebApp?.HapticFeedback) window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
-            },
-
-            toggleTask(id) {
-                const task = this.state.tasks.find(t => t.id === id);
-                if (task) {
-                    task.done = !task.done;
-                    this.state.tasks.sort((a, b) => (a.done === b.done) ? 0 : a.done ? 1 : -1);
-                    this.saveData();
-                    this.renderTasks();
-                    if(window.Telegram?.WebApp?.HapticFeedback && task.done) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-                }
-            },
-
-            // --- TRUANCY ---
-            markSkip() {
-                if(confirm("Точно прогулял? Пути назад не будет.")) {
-                    this.state.truancy++;
-                    this.saveData();
-                    this.updateTruancyUI();
-                    if(window.Telegram?.WebApp?.HapticFeedback) window.Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
-                }
-            },
-
-            updateTruancyUI() {
-                const ratio = document.getElementById('truancy-ratio');
-                const bar = document.getElementById('truancy-bar');
-                const text = document.getElementById('truancy-text');
-                
-                ratio.innerHTML = `${this.state.truancy}<span class="text-xs text-apple-muted">/${this.state.maxTruancy}</span>`;
-                const pct = Math.min((this.state.truancy / this.state.maxTruancy) * 100, 100);
-                bar.style.width = `${pct}%`;
-
-                if(pct > 80) {
-                    bar.style.background = '#ff3b30';
-                    text.innerText = 'Критический уровень! Скоро отчисление!';
-                    text.style.color = '#ff3b30';
-                } else if(pct > 50) {
-                    bar.style.background = '#ff9500';
-                    text.innerText = 'Опасно. Пора брать себя в руки.';
-                    text.style.color = '#ff9500';
-                } else {
-                    bar.style.background = '#ffffff';
-                    text.innerText = 'Пока всё чисто. Главное не борщить.';
-                    text.style.color = '#8e8e93';
-                }
-            },
-
-            // --- PIGGY BANK ---
-            openDepositModal() {
-                document.getElementById('step-1').style.display = 'block';
-                document.getElementById('step-2').style.display = 'none';
-                document.getElementById('deposit-amount').value = '';
-                document.getElementById('modal-deposit').classList.add('active');
-                setTimeout(() => document.getElementById('deposit-amount').focus(), 100);
-            },
-
-            closeModal(id) {
-                document.getElementById('modal-deposit').classList.remove('active');
-                if(this.timerInt) clearInterval(this.timerInt);
-            },
-
-            startDepositTimer() {
-                const amt = parseInt(document.getElementById('deposit-amount').value);
-                if(!amt || amt <= 0) return alert('Введите сумму');
-                
-                document.getElementById('step-1').style.display = 'none';
-                document.getElementById('step-2').style.display = 'block';
-                
-                let time = 600;
-                const timerEl = document.getElementById('deposit-timer');
-                
-                if(this.timerInt) clearInterval(this.timerInt);
-                this.timerInt = setInterval(() => {
-                    const m = Math.floor(time / 60).toString().padStart(2, '0');
-                    const s = (time % 60).toString().padStart(2, '0');
-                    timerEl.innerText = `${m}:${s}`;
-                    if(time <= 0) {
-                        clearInterval(this.timerInt);
-                        this.closeModal('modal-deposit');
-                    }
-                    time--;
-                }, 1000);
-            },
-
-            confirmDeposit() {
-                const amt = parseInt(document.getElementById('deposit-amount').value);
-                this.state.balance += amt;
-                
-                const dateOpts = { timeZone: 'Asia/Yekaterinburg', day: '2-digit', month: '2-digit', hour: '2-digit', minute:'2-digit' };
-                const dateStr = new Date().toLocaleString('ru-RU', dateOpts);
-                
-                this.state.history.unshift({ amt, date: dateStr });
-                
-                this.saveData();
-                this.updatePiggyUI();
-                
-                this.closeModal('modal-deposit');
-                this.showToast('Копилка пополнена!', 'check-circle');
-                if(window.Telegram?.WebApp?.HapticFeedback) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-            },
-
-            updatePiggyUI() {
-                document.getElementById('piggy-balance').innerText = `${this.state.balance.toLocaleString('ru-RU')} ₽`;
-                
-                const histCont = document.getElementById('piggy-history');
-                if(this.state.history.length === 0) {
-                    histCont.innerHTML = '<div class="glass-panel p-6 text-center text-sm text-apple-muted rounded-2xl">Сейф пока пуст.</div>';
-                } else {
-                    histCont.innerHTML = this.state.history.map(h => `
-                        <div class="glass-panel rounded-2xl p-4 flex justify-between items-center mb-2">
-                            <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white"><i data-lucide="arrow-down-left" class="w-5 h-5 icon-fix"></i></div>
-                                <span class="text-[15px] font-bold text-white">Взнос</span>
-                            </div>
-                            <div class="text-right">
-                                <div class="text-[16px] font-bold text-white">+${h.amt} ₽</div>
-                                <div class="text-[11px] text-apple-muted mt-0.5 font-mono">${h.date}</div>
-                            </div>
-                        </div>
-                    `).join('');
-                    if(window.lucide) lucide.createIcons();
-                }
-            },
-
-            copyPhone() {
-                navigator.clipboard.writeText("+79525081814").then(() => {
-                    this.showToast('Номер скопирован', 'copy');
-                    if(window.Telegram?.WebApp?.HapticFeedback) window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
-                });
-            },
-
-            // --- UTILS ---
-            showToast(msg, icon = 'check-circle') {
-                const toast = document.getElementById('toast');
-                document.getElementById('toast-msg').innerText = msg;
-                document.getElementById('toast-icon').setAttribute('data-lucide', icon);
-                
-                if(window.lucide) lucide.createIcons();
-                
-                toast.classList.remove('opacity-0', 'translate-y-[-20px]');
-                setTimeout(() => {
-                    toast.classList.add('opacity-0', 'translate-y-[-20px]');
-                }, 3000);
-            },
-
-            // --- DATA SYNC ---
-            saveData() {
-                localStorage.setItem('lifemanager_os_v1', JSON.stringify(this.state));
-            },
-
-            loadData() {
-                const local = localStorage.getItem('lifemanager_os_v1');
-                if(local) {
-                    try { this.state = { ...this.state, ...JSON.parse(local) }; } catch(e){}
-                }
-                this.updatePiggyUI();
-                this.updateTruancyUI();
-            }
-        };
-
-        // Modal close on backdrop click
-        document.querySelectorAll('.modal-overlay').forEach(el => {
-            el.addEventListener('click', (e) => {
-                if(e.target === el) app.closeModal(el.id);
-            });
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { getApp, getApps, initializeApp } from "firebase/app";
+import { doc, getDoc, getFirestore, setDoc } from "firebase/firestore";
+
+const TZ = "Asia/Yekaterinburg";
+const OZON_PHONE = "+79525081814";
+const DAYS_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"] as const;
+const DAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
+
+type TabKey = "vault" | "food" | "study" | "planner" | "sleep" | "xp";
+type TaskStatus = "todo" | "doing" | "done";
+type TaskType = "homework" | "freelance" | "plan";
+type TimelineType = "homework" | "rest" | "freelance";
+type EduMode = "university" | "school";
+type LessonType = "pair" | "lesson";
+type WeekType = "week1" | "week2";
+type WeekMode = "auto" | WeekType;
+
+type ScheduleItem = {
+  id: string;
+  mode: EduMode;
+  weekType: WeekType;
+  day: number;
+  start: string;
+  end: string;
+  title: string;
+  type: LessonType;
+  skipped: boolean;
+};
+
+type Task = {
+  id: string;
+  title: string;
+  type: TaskType;
+  status: TaskStatus;
+  weekKey: string;
+  locked: boolean;
+};
+
+type TimelineItem = {
+  id: string;
+  title: string;
+  type: TimelineType;
+  start: number;
+  end: number;
+  weekKey: string;
+  locked: boolean;
+};
+
+type AppData = {
+  profile: {
+    telegramId: string;
+    telegramUsername: string;
+    displayName: string;
+  };
+  vault: {
+    balance: number;
+    target: number;
+    lastPaidAt: string | null;
+  };
+  study: {
+    mode: EduMode;
+    absenceLimit: number;
+    fallbackFirstClass: string;
+    weekMode: WeekMode;
+    anchorDate: string;
+  };
+  schedule: ScheduleItem[];
+  planning: {
+    activeWeekKey: string;
+  };
+  tasks: Task[];
+  timeline: TimelineItem[];
+  alarm: {
+    enabled: boolean;
+    time: string;
+    autoFromSchedule: boolean;
+    awakeConfirmedAt: string | null;
+  };
+  xp: {
+    points: number;
+    spent: number;
+    lastDailyClaim: string | null;
+  };
+};
+
+type Identity = {
+  docId: string;
+  displayName: string;
+  telegramUsername: string;
+  telegramId: string;
+  source: "local" | "telegram";
+};
+
+type MealRecipe = {
+  title: string;
+  budget: string;
+  ingredients: string[];
+  steps: string[];
+};
+
+const RECIPE_BOOK = {
+  teaSandwich: {
+    title: "Чай и бутерброды с сыром/колбасой",
+    budget: "60-110 ₽",
+    ingredients: ["Хлеб 2-4 ломтика", "Сыр", "Колбаса", "Чай"],
+    steps: [
+      "Собери 2 бутерброда с сыром и колбасой.",
+      "Обжарь на сухой сковороде по 1 минуте с каждой стороны или разогрей в микроволновке.",
+      "Завари чай, ешь за 30-60 минут до выхода.",
+    ],
+  },
+  barEnergy: {
+    title: "Протеиновый батончик и энергетик",
+    budget: "120-180 ₽",
+    ingredients: ["1 протеиновый батончик", "1 энергетик 0.25-0.45"],
+    steps: ["Держи запас в рюкзаке.", "Используй на коротком перерыве между парами."],
+  },
+  bananaPeanut: {
+    title: "Банан и арахис",
+    budget: "45-80 ₽",
+    ingredients: ["1-2 банана", "Пакет арахиса 40-60 г"],
+    steps: ["Быстрый перекус без готовки.", "Ешь в длинный перерыв, когда нет времени на столовую."],
+  },
+  plov: {
+    title: "Плов на сковороде",
+    budget: "130-220 ₽",
+    ingredients: ["Рис 120-150 г", "Курица или свинина 180-220 г", "Лук", "Морковь", "Соль, перец"],
+    steps: [
+      "Нарежь мясо, обжарь 7-8 минут.",
+      "Добавь лук и морковь, жарь еще 4 минуты.",
+      "Засыпь промытый рис, залей горячей водой на 1.5 см выше риса.",
+      "Туши под крышкой 18-20 минут на слабом огне.",
+    ],
+  },
+  pastaSausage: {
+    title: "Макароны с колбасой",
+    budget: "90-150 ₽",
+    ingredients: ["Макароны 100-120 г", "Колбаса 120 г", "Масло", "Соль"],
+    steps: [
+      "Отвари макароны 8-10 минут.",
+      "Колбасу нарежь и обжарь 2-3 минуты.",
+      "Смешай макароны с колбасой, посоли по вкусу.",
+    ],
+  },
+  pastaSausageEgg: {
+    title: "Макароны с колбасой и яйцами",
+    budget: "110-170 ₽",
+    ingredients: ["Макароны 100-120 г", "Колбаса 100-120 г", "2-3 яйца", "Соль"],
+    steps: [
+      "Отвари макароны.",
+      "Обжарь колбасу 2 минуты.",
+      "Влей яйца, размешай, затем добавь макароны и доведи 2-3 минуты.",
+    ],
+  },
+  pastaEgg: {
+    title: "Макароны с яйцами",
+    budget: "70-120 ₽",
+    ingredients: ["Макароны 100-120 г", "2-3 яйца", "Соль", "Чуть масла"],
+    steps: ["Отвари макароны.", "На сковороде сделай яичную смесь и вмешай макароны.", "Готово за 10-12 минут."],
+  },
+  pastaMince: {
+    title: "Макароны с фаршем",
+    budget: "120-200 ₽",
+    ingredients: ["Макароны 100-120 г", "Фарш 180-220 г", "Лук", "Соль, перец"],
+    steps: [
+      "Обжарь фарш с луком 8-10 минут, разминая комки.",
+      "Отвари макароны отдельно.",
+      "Смешай, прогрей 2 минуты.",
+    ],
+  },
+  pastaChicken: {
+    title: "Макароны с курицей",
+    budget: "120-190 ₽",
+    ingredients: ["Макароны 100-120 г", "Курица 180-220 г", "Соль", "Паприка по желанию"],
+    steps: [
+      "Нарежь курицу кусочками, обжарь 8 минут до готовности.",
+      "Отвари макароны.",
+      "Смешай макароны и курицу, прогрей 1-2 минуты.",
+    ],
+  },
+  pastaCheese: {
+    title: "Макароны с сыром",
+    budget: "90-160 ₽",
+    ingredients: ["Макароны 100-120 г", "Сыр 60-90 г", "Немного сливочного масла"],
+    steps: [
+      "Отвари макароны.",
+      "Добавь масло и тертый сыр в горячие макароны.",
+      "Перемешай до тягучей текстуры.",
+    ],
+  },
+  kefirBanana: {
+    title: "Кефир и банан перед сном",
+    budget: "50-90 ₽",
+    ingredients: ["Кефир 0.5 л", "1 банан"],
+    steps: ["Выпей кефир за 40-60 минут до сна.", "Банан добавь, если остался голод."],
+  },
+  buckwheatChicken: {
+    title: "Гречка с курицей",
+    budget: "110-180 ₽",
+    ingredients: ["Гречка 100-120 г", "Курица 180-220 г", "Лук", "Соль, перец"],
+    steps: [
+      "Гречку промой и отвари 15-18 минут.",
+      "Курицу нарежь и обжарь 8-10 минут.",
+      "Добавь лук, жарь еще 2 минуты и смешай с гречкой.",
+    ],
+  },
+  potatoStew: {
+    title: "Картошка с тушенкой",
+    budget: "120-190 ₽",
+    ingredients: ["Картофель 4-5 шт", "Тушенка 1/2-1 банка", "Лук", "Соль"],
+    steps: [
+      "Картошку нарежь кубиком и отвари 12-15 минут до мягкости.",
+      "На сковороде прогрей тушенку с луком 4-5 минут.",
+      "Смешай с картошкой и прогрей 2 минуты.",
+    ],
+  },
+  riceEggChicken: {
+    title: "Рис с курицей и яйцом",
+    budget: "120-200 ₽",
+    ingredients: ["Рис 100-120 г", "Курица 150-200 г", "2 яйца", "Соль"],
+    steps: [
+      "Рис отвари 12-15 минут.",
+      "Курицу обжарь до готовности 8-10 минут.",
+      "Добавь яйца, размешай и смешай с рисом.",
+    ],
+  },
+  oatmealMass: {
+    title: "Овсянка с бананом и арахисом",
+    budget: "55-90 ₽",
+    ingredients: ["Овсянка 70-90 г", "Молоко или вода", "1 банан", "Арахис 20-30 г"],
+    steps: [
+      "Залей овсянку молоком или водой и вари 4-6 минут.",
+      "Добавь нарезанный банан и арахис.",
+      "Хороший плотный завтрак без сложной готовки.",
+    ],
+  },
+  curdHoney: {
+    title: "Творог с медом и бананом",
+    budget: "90-140 ₽",
+    ingredients: ["Творог 180-200 г", "Мед 1 ч.л.", "1 банан"],
+    steps: ["Смешай творог с медом.", "Добавь банан кружками.", "Ешь перед сном или в длинный перерыв."],
+  },
+} as const satisfies Record<string, MealRecipe>;
+
+type RecipeKey = keyof typeof RECIPE_BOOK;
+
+type MealPlanEntry = {
+  id: string;
+  time: string;
+  title: string;
+  note: string;
+  recipeKey: RecipeKey;
+};
+
+const REWARDS = {
+  classVisited: 10,
+  safeDeposit: 50,
+  sleepOnTime: 20,
+  taskDone: 15,
+  dailyFocus: 35,
+};
+
+const FIREBASE_CONFIG = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ?? "",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID ?? "",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ?? "",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID ?? "",
+};
+
+const FIREBASE_ENABLED = Object.values(FIREBASE_CONFIG).every(Boolean);
+const db = FIREBASE_ENABLED ? getFirestore(getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG)) : null;
+
+const TIMELINE_STYLE: Record<TimelineType, string> = {
+  homework: "timeline-homework",
+  rest: "timeline-rest",
+  freelance: "timeline-freelance",
+};
+
+const MAIN_RECIPES_WEEK1: RecipeKey[] = ["plov", "pastaSausageEgg", "buckwheatChicken", "pastaMince", "potatoStew", "pastaChicken", "riceEggChicken"];
+const MAIN_RECIPES_WEEK2: RecipeKey[] = ["pastaCheese", "plov", "riceEggChicken", "pastaMince", "buckwheatChicken", "pastaSausage", "potatoStew"];
+const SNACK_RECIPES: RecipeKey[] = ["barEnergy", "bananaPeanut"];
+
+function lesson(weekType: WeekType, day: number, start: string, end: string, title: string, type: LessonType = "pair", mode: EduMode = "university"): ScheduleItem {
+  return { id: crypto.randomUUID(), mode, weekType, day, start, end, title, type, skipped: false };
+}
+
+const USER_TEMPLATE_SCHEDULE: ScheduleItem[] = [
+  // Week 1
+  lesson("week1", 0, "11:20", "12:50", "Физическая культура", "pair"),
+  lesson("week1", 0, "13:15", "14:45", "Правоведение (Лекция)", "pair"),
+  lesson("week1", 0, "15:00", "16:30", "Правоведение (Практика)", "pair"),
+  lesson("week1", 1, "08:00", "09:30", "Информационные технологии (Лекция)", "pair"),
+  lesson("week1", 1, "09:40", "11:10", "Информационные технологии (Лекция)", "pair"),
+  lesson("week1", 1, "11:20", "12:50", "Системный анализ (Практика)", "pair"),
+  lesson("week1", 2, "09:40", "11:10", "Экономическая теория (Практика)", "pair"),
+  lesson("week1", 2, "11:25", "12:55", "Этика проф. деятельности (Практика)", "pair"),
+  lesson("week1", 2, "13:15", "14:45", "Финансовая математика (Лекция)", "pair"),
+  lesson("week1", 2, "15:00", "16:30", "Менеджмент (Лекция)", "pair"),
+  lesson("week1", 3, "09:40", "11:10", "Экономическая теория (Лекция)", "pair"),
+  lesson("week1", 3, "11:20", "12:50", "Менеджмент (Практика)", "pair"),
+  lesson("week1", 3, "13:15", "14:45", "Финансовая математика (Практика)", "pair"),
+
+  // Week 2
+  lesson("week2", 0, "13:15", "14:45", "Правоведение (Лекция)", "pair"),
+  lesson("week2", 0, "15:00", "16:30", "Правоведение (Практика)", "pair"),
+  lesson("week2", 1, "08:00", "09:30", "Деловые коммуникации (Практика)", "pair"),
+  lesson("week2", 1, "09:40", "11:10", "Системный анализ (Лекция)", "pair"),
+  lesson("week2", 1, "11:25", "12:55", "Физическая культура (Практика)", "pair"),
+  lesson("week2", 2, "09:40", "11:10", "Экономическая теория (Практика)", "pair"),
+  lesson("week2", 2, "11:20", "12:50", "История России (Практика)", "pair"),
+  lesson("week2", 2, "13:15", "14:45", "Финансовая математика (Лекция)", "pair"),
+  lesson("week2", 2, "15:00", "16:30", "Менеджмент (Лекция)", "pair"),
+  lesson("week2", 3, "08:00", "09:30", "Этика проф. деятельности (Лекция)", "pair"),
+  lesson("week2", 3, "09:45", "11:15", "Деловые коммуникации (Лекция)", "pair"),
+  lesson("week2", 3, "11:30", "13:00", "Менеджмент (Практика)", "pair"),
+  lesson("week2", 3, "13:15", "14:45", "Финансовая математика (Практика)", "pair"),
+  lesson("week2", 4, "11:20", "12:50", "Информационные технологии (Лабораторная)", "pair"),
+  lesson("week2", 4, "13:15", "14:45", "Информационные технологии (Лабораторная)", "pair"),
+];
+
+function ensureLocalUid() {
+  const stored = localStorage.getItem("focus-vault-uid");
+  if (stored) return stored;
+  const id = crypto.randomUUID();
+  localStorage.setItem("focus-vault-uid", id);
+  return id;
+}
+
+function nowInTz() {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+}
+
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat("ru-RU", { timeZone: TZ, dateStyle: "full" }).format(date);
+}
+
+function tzTime(date: Date) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
+
+function timeToMinutes(value: string) {
+  const [h, m] = value.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function minutesToTime(value: number) {
+  const normalized = ((value % 1440) + 1440) % 1440;
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function addMinutes(time: string, amount: number) {
+  return minutesToTime(timeToMinutes(time) + amount);
+}
+
+function subtractMinutes(time: string, amount: number) {
+  return minutesToTime(timeToMinutes(time) - amount);
+}
+
+function toWeekStart(date: Date) {
+  const local = new Date(date);
+  const day = (local.getDay() + 6) % 7;
+  local.setHours(0, 0, 0, 0);
+  local.setDate(local.getDate() - day);
+  return local;
+}
+
+function getWeekKey(date = nowInTz()) {
+  const local = toWeekStart(date);
+  return `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
+}
+
+function weekDateFromKey(key: string) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+function sundayLockPassed(weekKey: string, now = nowInTz()) {
+  const weekStart = weekDateFromKey(weekKey);
+  const lockPoint = new Date(weekStart);
+  lockPoint.setDate(lockPoint.getDate() + 6);
+  lockPoint.setHours(23, 59, 0, 0);
+  return now >= lockPoint;
+}
+
+function chelyabinskWeekday(date = nowInTz()) {
+  return (date.getDay() + 6) % 7;
+}
+
+function getAutoWeekType(now: Date, anchorDate: string) {
+  const anchor = new Date(anchorDate);
+  const currentWeekStart = toWeekStart(now);
+  const anchorWeekStart = toWeekStart(anchor);
+  const diffMs = currentWeekStart.getTime() - anchorWeekStart.getTime();
+  const weekShift = Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+  return Math.abs(weekShift) % 2 === 0 ? "week1" : "week2";
+}
+
+function getMainRecipe(day: number, weekType: WeekType): RecipeKey {
+  const source = weekType === "week1" ? MAIN_RECIPES_WEEK1 : MAIN_RECIPES_WEEK2;
+  return source[day % source.length];
+}
+
+function buildMealPlan(dayLessons: ScheduleItem[], sleepTime: string, day: number, weekType: WeekType): MealPlanEntry[] {
+  const sorted = dayLessons.slice().sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+  const firstClass = sorted[0]?.start;
+  const breakfastTime = firstClass
+    ? minutesToTime(Math.max(timeToMinutes(subtractMinutes(firstClass, 60)), timeToMinutes("06:30")))
+    : "08:30";
+
+  const breakfastRecipe: RecipeKey = day % 2 === 0 ? "teaSandwich" : "oatmealMass";
+
+  const plan: MealPlanEntry[] = [
+    {
+      id: crypto.randomUUID(),
+      time: breakfastTime,
+      title: RECIPE_BOOK[breakfastRecipe].title,
+      note: "Перед учебой",
+      recipeKey: breakfastRecipe,
+    },
+  ];
+
+  let snackIndex = 0;
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const current = sorted[i];
+    const next = sorted[i + 1];
+    const gap = timeToMinutes(next.start) - timeToMinutes(current.end);
+    if (gap >= 25) {
+      const snackKey = SNACK_RECIPES[snackIndex % SNACK_RECIPES.length];
+      snackIndex += 1;
+      plan.push({
+        id: crypto.randomUUID(),
+        time: addMinutes(current.end, 10),
+        title: RECIPE_BOOK[snackKey].title,
+        note: "Перерыв между парами",
+        recipeKey: snackKey,
+      });
+    }
+  }
+
+  if (!plan.some((entry) => entry.recipeKey === "barEnergy" || entry.recipeKey === "bananaPeanut")) {
+    const defaultSnack: RecipeKey = day % 2 === 0 ? "bananaPeanut" : "barEnergy";
+    plan.push({
+      id: crypto.randomUUID(),
+      time: "12:30",
+      title: RECIPE_BOOK[defaultSnack].title,
+      note: "Обязательный перекус",
+      recipeKey: defaultSnack,
+    });
+  }
+
+  const mainRecipe = getMainRecipe(day, weekType);
+  const lastEnd = sorted[sorted.length - 1]?.end ?? "16:00";
+  plan.push({
+    id: crypto.randomUUID(),
+    time: addMinutes(lastEnd, 70),
+    title: RECIPE_BOOK[mainRecipe].title,
+    note: "Основной прием пищи",
+    recipeKey: mainRecipe,
+  });
+
+  plan.push({
+    id: crypto.randomUUID(),
+    time: subtractMinutes(sleepTime, 60),
+    title: day % 2 === 0 ? RECIPE_BOOK.kefirBanana.title : RECIPE_BOOK.curdHoney.title,
+    note: "Легкий прием перед сном",
+    recipeKey: day % 2 === 0 ? "kefirBanana" : "curdHoney",
+  });
+
+  return plan.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+}
+
+function createDefaultState(): AppData {
+  const weekKey = getWeekKey();
+  return {
+    profile: {
+      telegramId: "",
+      telegramUsername: "",
+      displayName: "Гость",
+    },
+    vault: {
+      balance: 0,
+      target: 30000,
+      lastPaidAt: null,
+    },
+    study: {
+      mode: "university",
+      absenceLimit: 20,
+      fallbackFirstClass: "08:00",
+      weekMode: "auto",
+      anchorDate: "2026-04-05",
+    },
+    schedule: USER_TEMPLATE_SCHEDULE,
+    planning: {
+      activeWeekKey: weekKey,
+    },
+    tasks: [
+      { id: crypto.randomUUID(), title: "ДЗ по менеджменту", type: "homework", status: "todo", weekKey, locked: false },
+      { id: crypto.randomUUID(), title: "Заказ на FunPay", type: "freelance", status: "doing", weekKey, locked: false },
+    ],
+    timeline: [
+      { id: crypto.randomUUID(), title: "ДЗ", type: "homework", start: 18, end: 20, weekKey, locked: false },
+      { id: crypto.randomUUID(), title: "Фриланс", type: "freelance", start: 20, end: 22, weekKey, locked: false },
+      { id: crypto.randomUUID(), title: "Отдых", type: "rest", start: 22, end: 24, weekKey, locked: false },
+    ],
+    alarm: {
+      enabled: false,
+      time: "06:30",
+      autoFromSchedule: true,
+      awakeConfirmedAt: null,
+    },
+    xp: {
+      points: 0,
+      spent: 0,
+      lastDailyClaim: null,
+    },
+  };
+}
+
+function normalizeState(input: AppData): AppData {
+  const active = input.planning.activeWeekKey || getWeekKey();
+  const rolledWeek = sundayLockPassed(active)
+    ? getWeekKey(new Date(weekDateFromKey(active).getTime() + 7 * 24 * 60 * 60 * 1000))
+    : active;
+
+  return {
+    ...input,
+    planning: { activeWeekKey: rolledWeek },
+    tasks: input.tasks.map((task) => ({ ...task, locked: task.weekKey !== rolledWeek })),
+    timeline: input.timeline.map((item) => ({ ...item, locked: item.weekKey !== rolledWeek })),
+  };
+}
+
+function hydrateState(raw: unknown): AppData {
+  const fallback = createDefaultState();
+  if (!raw || typeof raw !== "object") return fallback;
+  const incoming = raw as Partial<AppData>;
+  const schedule = Array.isArray(incoming.schedule)
+    ? incoming.schedule.map((item) => ({
+        ...item,
+        mode: (item as Partial<ScheduleItem>).mode ?? ((item as Partial<ScheduleItem>).type === "lesson" ? "school" : "university"),
+        weekType: (item as Partial<ScheduleItem>).weekType ?? "week1",
+      }))
+    : fallback.schedule;
+
+  return normalizeState({
+    ...fallback,
+    ...incoming,
+    profile: { ...fallback.profile, ...(incoming.profile ?? {}) },
+    vault: { ...fallback.vault, ...(incoming.vault ?? {}) },
+    study: { ...fallback.study, ...(incoming.study ?? {}) },
+    planning: { ...fallback.planning, ...(incoming.planning ?? {}) },
+    alarm: { ...fallback.alarm, ...(incoming.alarm ?? {}) },
+    xp: { ...fallback.xp, ...(incoming.xp ?? {}) },
+    schedule,
+    tasks: Array.isArray(incoming.tasks) ? incoming.tasks : fallback.tasks,
+    timeline: Array.isArray(incoming.timeline) ? incoming.timeline : fallback.timeline,
+  });
+}
+
+export default function App() {
+  const [data, setData] = useState<AppData>(createDefaultState);
+  const [loaded, setLoaded] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
+  const [syncLabel, setSyncLabel] = useState("Boot");
+  const [tab, setTab] = useState<TabKey>("vault");
+  const [tick, setTick] = useState(new Date());
+  const [identity, setIdentity] = useState<Identity>(() => ({
+    docId: ensureLocalUid(),
+    displayName: "Гость",
+    telegramUsername: "",
+    telegramId: "",
+    source: "local",
+  }));
+
+  const [vaultInput, setVaultInput] = useState(1000);
+  const [paymentWindow, setPaymentWindow] = useState<{ amount: number; expiresAt: number } | null>(null);
+  const [activeRecipe, setActiveRecipe] = useState<RecipeKey | null>(null);
+  const [selectedDay, setSelectedDay] = useState(() => chelyabinskWeekday());
+  const [selectedStudyDay, setSelectedStudyDay] = useState(() => chelyabinskWeekday());
+  const [studyEditorOpen, setStudyEditorOpen] = useState(false);
+  const [scheduleDraft, setScheduleDraft] = useState({
+    weekType: "week1" as WeekType,
+    day: chelyabinskWeekday(),
+    start: "08:00",
+    end: "09:30",
+    title: "",
+    type: "pair" as LessonType,
+  });
+  const [newTask, setNewTask] = useState("");
+  const [newTaskType, setNewTaskType] = useState<TaskType>("homework");
+  const [timelineDraft, setTimelineDraft] = useState({ title: "", type: "homework" as TimelineType, start: 18, end: 20 });
+
+  const nowChelyab = nowInTz();
+  const autoWeekType = getAutoWeekType(nowChelyab, data.study.anchorDate);
+  const activeWeekType: WeekType = data.study.weekMode === "auto" ? autoWeekType : data.study.weekMode;
+  const currentTime = tzTime(tick);
+  const todayIndex = chelyabinskWeekday(nowChelyab);
+
+  const scopedSchedule = useMemo(
+    () =>
+      data.schedule
+        .filter((item) => {
+          if (item.mode !== data.study.mode) return false;
+          if (data.study.mode === "school") return true;
+          return item.weekType === activeWeekType;
+        })
+        .sort((a, b) => a.day - b.day || timeToMinutes(a.start) - timeToMinutes(b.start)),
+    [data.schedule, data.study.mode, activeWeekType],
+  );
+
+  const todaySchedule = useMemo(
+    () => scopedSchedule.filter((item) => item.day === todayIndex).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
+    [scopedSchedule, todayIndex],
+  );
+  const selectedDaySchedule = useMemo(
+    () => scopedSchedule.filter((item) => item.day === selectedDay).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
+    [scopedSchedule, selectedDay],
+  );
+  const selectedStudySchedule = useMemo(
+    () => scopedSchedule.filter((item) => item.day === selectedStudyDay).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start)),
+    [scopedSchedule, selectedStudyDay],
+  );
+
+  const firstClassTime = todaySchedule[0]?.start ?? "";
+
+  const nextClassInfo = useMemo(() => {
+    const nowMinutes = timeToMinutes(currentTime);
+
+    for (let dayShift = 0; dayShift < 14; dayShift += 1) {
+      const date = new Date(nowChelyab);
+      date.setDate(nowChelyab.getDate() + dayShift);
+      const dayIndex = chelyabinskWeekday(date);
+      const weekTypeByDate: WeekType = data.study.weekMode === "auto" ? getAutoWeekType(date, data.study.anchorDate) : data.study.weekMode;
+
+      const daySchedule = data.schedule
+        .filter((item) => {
+          if (item.mode !== data.study.mode) return false;
+          if (item.day !== dayIndex) return false;
+          if (data.study.mode === "school") return true;
+          return item.weekType === weekTypeByDate;
+        })
+        .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+
+      if (daySchedule.length === 0) continue;
+
+      const classForDay =
+        dayShift === 0
+          ? daySchedule.find((item) => timeToMinutes(item.start) > nowMinutes)
+          : daySchedule[0];
+
+      if (!classForDay) continue;
+
+      return {
+        dayShift,
+        dayIndex,
+        start: classForDay.start,
+        title: classForDay.title,
+      };
+    }
+
+    return null;
+  }, [data.schedule, data.study.mode, data.study.weekMode, data.study.anchorDate, currentTime, nowChelyab]);
+
+  const wakeTime = nextClassInfo ? subtractMinutes(nextClassInfo.start, 100) : data.alarm.time;
+  const sleepTime = subtractMinutes(wakeTime, 8 * 60);
+  const shouldSleep = Boolean(nextClassInfo) && timeToMinutes(currentTime) >= timeToMinutes(sleepTime);
+  const alarmTriggered = data.alarm.enabled && timeToMinutes(currentTime) >= timeToMinutes(data.alarm.time) && !data.alarm.awakeConfirmedAt;
+
+  const mealPlan = useMemo(() => buildMealPlan(selectedDaySchedule, sleepTime, selectedDay, activeWeekType), [selectedDaySchedule, sleepTime, selectedDay, activeWeekType]);
+
+  const paymentMs = paymentWindow ? Math.max(0, paymentWindow.expiresAt - tick.getTime()) : 0;
+  const paymentMinutes = Math.floor(paymentMs / 60000);
+  const paymentSeconds = Math.floor((paymentMs % 60000) / 1000);
+  const safeProgress = Math.min(100, Math.round((data.vault.balance / Math.max(1, data.vault.target)) * 100));
+
+  const weekSkipped = scopedSchedule.filter((item) => item.skipped).length;
+  const attendancePercent = Math.min(100, Math.round((weekSkipped / Math.max(1, data.study.absenceLimit)) * 100));
+
+  const weekKey = data.planning.activeWeekKey;
+  const currentTasks = data.tasks.filter((item) => item.weekKey === weekKey);
+  const currentTimeline = data.timeline.filter((item) => item.weekKey === weekKey);
+  const archiveWeeks = [...new Set(data.tasks.map((item) => item.weekKey).filter((item) => item !== weekKey))].sort().reverse();
+
+  useEffect(() => {
+    const interval = setInterval(() => setTick(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSplashDone(true), 1400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!paymentWindow || paymentMs > 0) return;
+    setPaymentWindow(null);
+  }, [paymentWindow, paymentMs]);
+
+  useEffect(() => {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return;
+
+    tg.ready();
+    tg.expand();
+
+    const user = tg.initDataUnsafe?.user;
+    if (!user?.id) return;
+
+    const name = [user.first_name, user.last_name].filter(Boolean).join(" ") || user.username || `ID ${user.id}`;
+    setIdentity({
+      docId: `tg-${user.id}`,
+      displayName: name,
+      telegramUsername: user.username ? `@${user.username}` : `id:${user.id}`,
+      telegramId: String(user.id),
+      source: "telegram",
+    });
+  }, []);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      setLoaded(false);
+      const localRaw = localStorage.getItem("focus-vault-local-data");
+      let localState = createDefaultState();
+
+      try {
+        localState = hydrateState(localRaw ? JSON.parse(localRaw) : createDefaultState());
+      } catch {
+        localState = createDefaultState();
+      }
+
+      if (!db) {
+        setData({
+          ...localState,
+          profile: {
+            telegramId: identity.telegramId,
+            telegramUsername: identity.telegramUsername,
+            displayName: identity.displayName,
+          },
         });
+        setSyncLabel("Local mode");
+        setLoaded(true);
+        return;
+      }
 
-        window.addEventListener('load', () => window.app.init());
+      try {
+        setSyncLabel("Firebase sync...");
+        const ref = doc(db, "focusVault", identity.docId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const remote = hydrateState(snap.data().state);
+          setData({
+            ...remote,
+            profile: {
+              telegramId: identity.telegramId,
+              telegramUsername: identity.telegramUsername,
+              displayName: identity.displayName,
+            },
+          });
+        } else {
+          const fresh = {
+            ...localState,
+            profile: {
+              telegramId: identity.telegramId,
+              telegramUsername: identity.telegramUsername,
+              displayName: identity.displayName,
+            },
+          };
+          await setDoc(ref, { state: fresh, updatedAt: Date.now() });
+          setData(fresh);
+        }
+        setSyncLabel("Firebase online");
+      } catch {
+        setData(localState);
+        setSyncLabel("Firebase error -> local backup");
+      } finally {
+        setLoaded(true);
+      }
+    };
 
-    </script>
-</body>
-</html>
+    void bootstrap();
+  }, [identity.docId, identity.displayName, identity.telegramId, identity.telegramUsername]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    localStorage.setItem("focus-vault-local-data", JSON.stringify(data));
+    if (!db) return;
+    void setDoc(doc(db, "focusVault", identity.docId), { state: data, updatedAt: Date.now() }, { merge: true });
+  }, [data, loaded, identity.docId]);
+
+  useEffect(() => {
+    if (!alarmTriggered) return;
+    if (navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]);
+    const loop = setInterval(() => {
+      if (navigator.vibrate) navigator.vibrate([260, 80, 260]);
+    }, 4500);
+    return () => clearInterval(loop);
+  }, [alarmTriggered]);
+
+  useEffect(() => {
+    if (!data.alarm.autoFromSchedule || !nextClassInfo) return;
+    if (data.alarm.time === wakeTime) return;
+    setData((prev) => {
+      if (!prev.alarm.autoFromSchedule || prev.alarm.time === wakeTime) return prev;
+      return { ...prev, alarm: { ...prev.alarm, time: wakeTime } };
+    });
+  }, [data.alarm.autoFromSchedule, data.alarm.time, nextClassInfo, wakeTime]);
+
+  const addXP = (amount: number) => {
+    setData((prev) => ({ ...prev, xp: { ...prev.xp, points: prev.xp.points + amount } }));
+  };
+
+  const claimDailyFocus = () => {
+    const claimKey = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, dateStyle: "short" }).format(nowChelyab);
+    setData((prev) => {
+      if (prev.xp.lastDailyClaim === claimKey) return prev;
+      return {
+        ...prev,
+        xp: {
+          ...prev.xp,
+          points: prev.xp.points + REWARDS.dailyFocus,
+          lastDailyClaim: claimKey,
+        },
+      };
+    });
+  };
+
+  const cycleTaskStatus = (taskId: string) => {
+    setData((prev) => {
+      let reward = 0;
+      const tasks = prev.tasks.map((entry) => {
+        if (entry.id !== taskId || entry.locked) return entry;
+        const order: TaskStatus[] = ["todo", "doing", "done"];
+        const nextStatus = order[(order.indexOf(entry.status) + 1) % order.length];
+        if (entry.status !== "done" && nextStatus === "done") reward = REWARDS.taskDone;
+        return { ...entry, status: nextStatus };
+      });
+
+      if (!reward) return { ...prev, tasks };
+      return {
+        ...prev,
+        tasks,
+        xp: { ...prev.xp, points: prev.xp.points + reward },
+      };
+    });
+  };
+
+  const openPaymentWindow = () => {
+    const rounded = Math.round(vaultInput);
+    if (rounded <= 0) return;
+    setPaymentWindow({ amount: rounded, expiresAt: Date.now() + 10 * 60 * 1000 });
+  };
+
+  const confirmPayment = () => {
+    if (!paymentWindow) return;
+    setData((prev) => ({
+      ...prev,
+      vault: {
+        ...prev.vault,
+        balance: prev.vault.balance + paymentWindow.amount,
+        lastPaidAt: new Date().toISOString(),
+      },
+    }));
+    addXP(REWARDS.safeDeposit);
+    setPaymentWindow(null);
+  };
+
+  const addScheduleRow = () => {
+    if (!scheduleDraft.title.trim()) return;
+    if (timeToMinutes(scheduleDraft.end) <= timeToMinutes(scheduleDraft.start)) return;
+    setData((prev) => ({
+      ...prev,
+      schedule: [
+        ...prev.schedule,
+        {
+          id: crypto.randomUUID(),
+          mode: prev.study.mode,
+          weekType: prev.study.mode === "school" ? "week1" : scheduleDraft.weekType,
+          day: scheduleDraft.day,
+          start: scheduleDraft.start,
+          end: scheduleDraft.end,
+          title: scheduleDraft.title.trim(),
+          type: scheduleDraft.type,
+          skipped: false,
+        },
+      ],
+    }));
+    setScheduleDraft((prev) => ({ ...prev, title: "" }));
+  };
+
+  const clearSchedule = () => {
+    if (!window.confirm("Точно очистить все пары/уроки?")) return;
+    setData((prev) => ({ ...prev, schedule: prev.schedule.filter((item) => item.mode !== prev.study.mode) }));
+  };
+
+  const loadTemplateSchedule = () => {
+    setData((prev) => ({
+      ...prev,
+      schedule: [
+        ...prev.schedule.filter((item) => item.mode !== "university"),
+        ...USER_TEMPLATE_SCHEDULE.map((item) => ({ ...item, id: crypto.randomUUID(), skipped: false, mode: "university" as const })),
+      ],
+    }));
+  };
+
+  const addTask = () => {
+    const title = newTask.trim();
+    if (!title) return;
+    setData((prev) => ({
+      ...prev,
+      tasks: [...prev.tasks, { id: crypto.randomUUID(), title, type: newTaskType, status: "todo", weekKey: prev.planning.activeWeekKey, locked: false }],
+    }));
+    setNewTask("");
+  };
+
+  const addTimelineBlock = () => {
+    const title = timelineDraft.title.trim();
+    if (!title) return;
+    const start = Math.max(8, Math.min(23, timelineDraft.start));
+    const end = Math.max(start + 1, Math.min(24, timelineDraft.end));
+    setData((prev) => ({
+      ...prev,
+      timeline: [...prev.timeline, { id: crypto.randomUUID(), title, type: timelineDraft.type, start, end, weekKey: prev.planning.activeWeekKey, locked: false }],
+    }));
+    setTimelineDraft((prev) => ({ ...prev, title: "" }));
+  };
+
+  const tabs: Array<{ key: TabKey; label: string }> = [
+    { key: "vault", label: "Копилка" },
+    { key: "food", label: "Питание" },
+    { key: "study", label: "Учеба" },
+    { key: "planner", label: "Дела" },
+    { key: "sleep", label: "Сон" },
+    { key: "xp", label: "XP" },
+  ];
+
+  if (!loaded || !splashDone) {
+    return (
+      <div className="app-shell app-loader">
+        <div className="loader-orbit" aria-hidden="true" />
+        <div className="loader-crane" aria-hidden="true">
+          <div className="loader-rail" />
+          <div className="loader-cabin" />
+          <div className="loader-line" />
+          <div className="loader-hook" />
+        </div>
+        <motion.p className="loader-text" initial={{ opacity: 0.45 }} animate={{ opacity: 1 }} transition={{ repeat: Infinity, repeatType: "reverse", duration: 1.1 }}>
+          Сборка интерфейса и синхронизация
+        </motion.p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <motion.div className="ambient ambient-left" animate={{ y: [-26, 14, -26], opacity: [0.25, 0.48, 0.25] }} transition={{ repeat: Infinity, duration: 12, ease: "easeInOut" }} />
+      <motion.div className="ambient ambient-right" animate={{ y: [24, -14, 24], opacity: [0.2, 0.44, 0.2] }} transition={{ repeat: Infinity, duration: 10, ease: "easeInOut" }} />
+      <motion.div className="ambient ambient-mid" animate={{ scale: [1, 1.08, 1], opacity: [0.22, 0.4, 0.22] }} transition={{ repeat: Infinity, duration: 8.5, ease: "easeInOut" }} />
+      <motion.div className="wordmark-ghost" animate={{ opacity: [0.1, 0.2, 0.08, 0.18, 0.1] }} transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}>
+        ROUTINE
+      </motion.div>
+
+      <main className="relative z-10 mx-auto w-full max-w-6xl px-4 pb-12 pt-6 md:px-8">
+        <section className="hero-surface">
+          <div className="hero-grid">
+            <div>
+              <h1 className="hero-title">Routine</h1>
+              <p className="hero-subtitle">Личный трекер с копилкой, расписанием, питанием, делами и сном. Время: Челябинск.</p>
+            </div>
+            <div className="hero-meta">
+              <p>{formatDate(nowChelyab)}</p>
+              <p className="hero-time">{currentTime}</p>
+              <p>{identity.displayName}</p>
+              <p>{syncLabel}</p>
+            </div>
+          </div>
+
+          <nav className="tab-bar mt-6">
+            {tabs.map((item) => (
+              <button key={item.key} onClick={() => setTab(item.key)} className={`tab-btn ${tab === item.key ? "active" : ""}`}>
+                {tab === item.key && <motion.span layoutId="active-pill" className="tab-pill" transition={{ type: "spring", stiffness: 280, damping: 24 }} />}
+                <span className="relative z-10">{item.label}</span>
+              </button>
+            ))}
+          </nav>
+        </section>
+
+        <AnimatePresence mode="wait">
+          {tab === "vault" && (
+            <motion.section key="vault" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+              <h2 className="feature-title">Копилка</h2>
+              <p className="feature-text">Баланс: {data.vault.balance.toLocaleString("ru-RU")} ₽. Пополнение через окно оплаты на 10 минут.</p>
+
+              <div className="mt-5 grid gap-5 md:grid-cols-[1.1fr,1fr]">
+                <div className="space-y-3">
+                  <label className="label">Сумма пополнения</label>
+                  <input className="field" type="number" min={1} value={vaultInput} onChange={(e) => setVaultInput(Number(e.target.value) || 0)} />
+                  <label className="label">Цель накопления</label>
+                  <input
+                    className="field"
+                    type="number"
+                    min={1}
+                    value={data.vault.target}
+                    onChange={(e) => setData((prev) => ({ ...prev, vault: { ...prev.vault, target: Number(e.target.value) || 0 } }))}
+                  />
+                  <button className="primary-btn" onClick={openPaymentWindow}>Пополнить</button>
+                </div>
+
+                <div>
+                  <p className="metric-label">Текущий баланс</p>
+                  <p className="metric-value">{data.vault.balance.toLocaleString("ru-RU")} ₽</p>
+                  <div className="progress-line mt-3">
+                    <motion.div className="progress-fill" animate={{ width: `${safeProgress}%` }} />
+                  </div>
+                  <p className="mt-3 text-sm text-black/60">Прогресс до цели: {safeProgress}%</p>
+                  <p className="mt-1 text-sm text-black/60">Реквизиты оплаты: {OZON_PHONE} (СБП, OZON Банк)</p>
+                  <p className="mt-1 text-sm text-black/60">Последняя оплата: {data.vault.lastPaidAt ? new Date(data.vault.lastPaidAt).toLocaleString("ru-RU") : "еще не было"}</p>
+                </div>
+              </div>
+            </motion.section>
+          )}
+
+          {tab === "food" && (
+            <motion.section key="food" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+               <h2 className="feature-title">Питание на день</h2>
+               <p className="feature-text">План строится по расписанию выбранного дня. Все блюда простые и бюджетные для набора массы.</p>
+
+                <div className="mt-4 text-sm text-black/65">Сегодня: {DAYS_FULL[todayIndex]}, {firstClassTime ? `первая пара ${firstClassTime}` : "пар нет"}, ориентир отбоя {sleepTime}.</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {DAYS_SHORT.map((day, idx) => (
+                  <button key={day} className={`secondary-btn ${selectedDay === idx ? "active" : ""}`} onClick={() => setSelectedDay(idx)}>
+                    {day}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-5 grid gap-2">
+                {mealPlan.map((meal) => (
+                  <button key={meal.id} className="line-item line-item-btn" onClick={() => setActiveRecipe(meal.recipeKey)}>
+                    <span>{meal.time}</span>
+                    <span>{meal.title}</span>
+                    <span className="text-black/55">{meal.note}</span>
+                  </button>
+                ))}
+              </div>
+
+              {activeRecipe && (
+                <motion.div className="recipe-sheet mt-4" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                  <p className="recipe-title">{RECIPE_BOOK[activeRecipe].title}</p>
+                  <p className="mt-1 text-sm text-black/65">Бюджет: {RECIPE_BOOK[activeRecipe].budget}</p>
+                  <p className="label mt-3">Ингредиенты</p>
+                  <div className="space-y-1 text-sm text-black/70">
+                    {RECIPE_BOOK[activeRecipe].ingredients.map((item) => (
+                      <div key={item}>- {item}</div>
+                    ))}
+                  </div>
+                  <p className="label mt-3">Как приготовить</p>
+                  <div className="space-y-1 text-sm text-black/70">
+                    {RECIPE_BOOK[activeRecipe].steps.map((item, idx) => (
+                      <div key={item}>{idx + 1}. {item}</div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </motion.section>
+          )}
+
+          {tab === "study" && (
+            <motion.section key="study" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+               <h2 className="feature-title">Учеба</h2>
+               <p className="feature-text">Выбери день недели и смотри расписание только для него.</p>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  className={`secondary-btn ${data.study.mode === "university" ? "active" : ""}`}
+                  onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, mode: "university", absenceLimit: 20 } }))}
+                >
+                  Универ
+                </button>
+                <button
+                  className={`secondary-btn ${data.study.mode === "school" ? "active" : ""}`}
+                  onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, mode: "school", absenceLimit: 40 } }))}
+                >
+                  Школа
+                </button>
+                {data.study.mode === "university" && (
+                  <>
+                    <button className={`secondary-btn ${data.study.weekMode === "auto" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "auto" } }))}>Автовыбор недели</button>
+                    <button className={`secondary-btn ${data.study.weekMode === "week1" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "week1" } }))}>Неделя 1</button>
+                    <button className={`secondary-btn ${data.study.weekMode === "week2" ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, study: { ...prev.study, weekMode: "week2" } }))}>Неделя 2</button>
+                  </>
+                )}
+                 <button className={`secondary-btn ${studyEditorOpen ? "active" : ""}`} onClick={() => setStudyEditorOpen((prev) => !prev)}>{studyEditorOpen ? "Скрыть редактирование" : "Редактировать расписание"}</button>
+                {data.study.mode === "university" && <button className="secondary-btn" onClick={loadTemplateSchedule}>Загрузить твой шаблон</button>}
+                <button className="danger-btn" onClick={clearSchedule}>Стереть расписание</button>
+              </div>
+
+               <div className="mt-3 flex flex-wrap gap-2">
+                 {DAYS_FULL.map((day, idx) => (
+                   <button key={day} className={`secondary-btn ${selectedStudyDay === idx ? "active" : ""}`} onClick={() => {
+                     setSelectedStudyDay(idx);
+                     setScheduleDraft((prev) => ({ ...prev, day: idx, weekType: activeWeekType }));
+                   }}>
+                     {day}
+                   </button>
+                 ))}
+               </div>
+
+               <div className="mt-4 space-y-2">
+                 {selectedStudySchedule.length === 0 && <div className="line-item text-sm text-black/60">На этот день занятий нет.</div>}
+                 {selectedStudySchedule.map((item) => (
+                   <div key={item.id} className="line-item flex flex-wrap items-center justify-between gap-2">
+                     <div>
+                       <div className="text-sm text-black/60">{item.start} - {item.end}</div>
+                       <div className="font-medium">{item.title}</div>
+                     </div>
+                     <div className="flex gap-2">
+                       <button
+                         className={`secondary-btn tight ${item.skipped ? "active" : ""}`}
+                         onClick={() => {
+                           setData((prev) => ({ ...prev, schedule: prev.schedule.map((s) => (s.id === item.id ? { ...s, skipped: !s.skipped } : s)) }));
+                           if (item.skipped) addXP(REWARDS.classVisited);
+                         }}
+                       >
+                         {item.skipped ? "Прогул" : "Посещено"}
+                       </button>
+                       {studyEditorOpen && <button className="danger-btn tight" onClick={() => setData((prev) => ({ ...prev, schedule: prev.schedule.filter((s) => s.id !== item.id) }))}>Удалить</button>}
+                     </div>
+                   </div>
+                 ))}
+               </div>
+
+                {studyEditorOpen && (
+                  <div className={`mt-4 grid gap-2 ${data.study.mode === "university" ? "md:grid-cols-[120px,120px,120px,1fr,120px,120px]" : "md:grid-cols-[120px,120px,1fr,120px,120px]"}`}>
+                    {data.study.mode === "university" && (
+                      <select className="field" value={scheduleDraft.weekType} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, weekType: e.target.value as WeekType }))}>
+                        <option value="week1">Неделя 1</option>
+                        <option value="week2">Неделя 2</option>
+                      </select>
+                    )}
+                   <input className="field" type="time" value={scheduleDraft.start} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, start: e.target.value }))} />
+                   <input className="field" type="time" value={scheduleDraft.end} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, end: e.target.value }))} />
+                   <input className="field" value={scheduleDraft.title} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, title: e.target.value }))} placeholder="Новая запись" />
+                   <select className="field" value={scheduleDraft.type} onChange={(e) => setScheduleDraft((prev) => ({ ...prev, type: e.target.value as LessonType }))}>
+                     <option value="pair">Пара</option>
+                     <option value="lesson">Урок</option>
+                   </select>
+                   <button className="primary-btn" onClick={addScheduleRow}>Добавить</button>
+                 </div>
+               )}
+
+              <p className="mt-4 text-sm text-black/70">Риск прогулов (активная неделя): {weekSkipped} / {data.study.absenceLimit}</p>
+              <div className="progress-line mt-2">
+                <motion.div className={`h-full ${attendancePercent < 60 ? "bg-emerald-500" : attendancePercent < 85 ? "bg-yellow-500" : "bg-red-500"}`} animate={{ width: `${attendancePercent}%` }} />
+              </div>
+            </motion.section>
+          )}
+
+          {tab === "planner" && (
+            <motion.section key="planner" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+              <h2 className="feature-title">Дела</h2>
+              <p className="feature-text">Понятный список задач и блоки времени на день.</p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <input className="field min-w-[220px] flex-1" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Новая задача" />
+                <select className="field w-[160px]" value={newTaskType} onChange={(e) => setNewTaskType(e.target.value as TaskType)}>
+                  <option value="homework">ДЗ</option>
+                  <option value="freelance">Фриланс</option>
+                  <option value="plan">План</option>
+                </select>
+                <button className="primary-btn" onClick={addTask}>Добавить</button>
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                {([
+                  ["todo", "Запланировано"],
+                  ["doing", "В процессе"],
+                  ["done", "Сделано"],
+                ] as const).map(([status, label]) => (
+                  <div key={status} className="column-shell">
+                    <p className="column-title">{label}</p>
+                    <div className="mt-2 space-y-2">
+                      {currentTasks.filter((task) => task.status === status).map((task) => (
+                        <button
+                          key={task.id}
+                          disabled={task.locked}
+                          className="task-chip"
+                          onClick={() => cycleTaskStatus(task.id)}
+                        >
+                          {task.title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6">
+                <p className="label">План по времени</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <input className="field w-[210px]" value={timelineDraft.title} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, title: e.target.value }))} placeholder="Блок времени" />
+                  <select className="field w-[150px]" value={timelineDraft.type} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, type: e.target.value as TimelineType }))}>
+                    <option value="homework">ДЗ</option>
+                    <option value="freelance">Фриланс</option>
+                    <option value="rest">Отдых</option>
+                  </select>
+                  <input className="field w-[100px]" type="number" min={8} max={23} value={timelineDraft.start} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, start: Number(e.target.value) || 8 }))} />
+                  <input className="field w-[100px]" type="number" min={9} max={24} value={timelineDraft.end} onChange={(e) => setTimelineDraft((prev) => ({ ...prev, end: Number(e.target.value) || 9 }))} />
+                  <button className="primary-btn" onClick={addTimelineBlock}>Добавить блок</button>
+                </div>
+
+                <div className="time-axis mt-3">
+                  {Array.from({ length: 9 }).map((_, idx) => (
+                    <span key={idx}>{String(8 + idx * 2).padStart(2, "0")}:00</span>
+                  ))}
+                </div>
+                <div className="mt-3 grid grid-cols-12 gap-2">
+                  {currentTimeline.map((item) => (
+                    <div key={item.id} className={`timeline-block ${TIMELINE_STYLE[item.type]}`} style={{ gridColumn: `${Math.max(1, item.start - 7)} / ${Math.min(13, item.end - 7)}` }}>
+                      {item.title} {item.start}:00-{item.end}:00
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {archiveWeeks.length > 0 && <p className="mt-4 text-xs text-black/50">Архив недель (locked): {archiveWeeks.join(", ")}</p>}
+            </motion.section>
+          )}
+
+          {tab === "sleep" && (
+            <motion.section key="sleep" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+               <h2 className="feature-title">Сон и будильник</h2>
+               <p className="feature-text">
+                 {nextClassInfo
+                   ? `Ближайшее занятие: ${DAYS_FULL[nextClassInfo.dayIndex]} в ${nextClassInfo.start}. Подъем: ${wakeTime}. Рекомендуемый отбой: ${sleepTime}.`
+                   : "В расписании нет занятий. Укажи их в разделе Учеба, чтобы расчет сна стал точным."}
+               </p>
+
+              <div className={`sleep-alert ${shouldSleep ? "late" : "ok"}`}>
+                {shouldSleep
+                  ? `Сейчас ${currentTime}. Чтобы встать к ${wakeTime}, лучше уже ложиться.`
+                  : `Сейчас ${currentTime}. До сна по графику еще есть время.`}
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button className="primary-btn" onClick={() => addXP(REWARDS.sleepOnTime)}>Лег вовремя (+{REWARDS.sleepOnTime} XP)</button>
+                <input
+                  className="field w-[170px]"
+                  type="time"
+                  value={data.alarm.time}
+                  onChange={(e) =>
+                    setData((prev) => ({ ...prev, alarm: { ...prev.alarm, time: e.target.value, autoFromSchedule: false, awakeConfirmedAt: null } }))
+                  }
+                />
+                <button
+                  className={`secondary-btn ${data.alarm.autoFromSchedule ? "active" : ""}`}
+                  onClick={() =>
+                    setData((prev) => ({
+                      ...prev,
+                      alarm: {
+                        ...prev.alarm,
+                        autoFromSchedule: !prev.alarm.autoFromSchedule,
+                        time: !prev.alarm.autoFromSchedule && nextClassInfo ? wakeTime : prev.alarm.time,
+                        awakeConfirmedAt: null,
+                      },
+                    }))
+                  }
+                >
+                  {data.alarm.autoFromSchedule ? "Авто от расписания" : "Ручной будильник"}
+                </button>
+                <button className={`secondary-btn ${data.alarm.enabled ? "active" : ""}`} onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, enabled: !prev.alarm.enabled, awakeConfirmedAt: null } }))}>
+                  {data.alarm.enabled ? "Будильник включен" : "Будильник выключен"}
+                </button>
+              </div>
+
+              <p className="mt-2 text-sm text-black/60">Будильник: {data.alarm.time}. {nextClassInfo ? `Ориентир по расписанию: ${wakeTime}.` : "Добавь занятия, чтобы авторасчет был точнее."}</p>
+
+              <p className="mt-3 text-sm text-black/60">Профиль: {identity.telegramUsername || identity.telegramId || "не определен"}. В Telegram WebApp пользователь определяется автоматически.</p>
+
+              {alarmTriggered && (
+                <motion.div className="alarm-overlay mt-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  <p>Подъем. Если приложение свернуто, надежное оповещение остается через Telegram-бота.</p>
+                  <div className="mt-3 flex gap-2">
+                    <button className="primary-btn" onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, enabled: false, awakeConfirmedAt: new Date().toISOString() } }))}>Проснулся</button>
+                    <button className="secondary-btn" onClick={() => setData((prev) => ({ ...prev, alarm: { ...prev.alarm, time: addMinutes(prev.alarm.time, 10), awakeConfirmedAt: null } }))}>Отложить на 10 минут</button>
+                  </div>
+                </motion.div>
+              )}
+            </motion.section>
+          )}
+
+          {tab === "xp" && (
+            <motion.section key="xp" className="feature-surface" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+              <h2 className="feature-title">XP</h2>
+              <p className="feature-text">XP начисляется за посещение, копилку, сон и закрытие задач.</p>
+              <p className="metric-value mt-3">{data.xp.points}</p>
+              <p className="metric-label">доступно XP</p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className="primary-btn" onClick={claimDailyFocus}>
+                  Закрыл день (+{REWARDS.dailyFocus} XP)
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {[
+                  [60, "1 час игры"],
+                  [90, "Серия сериала"],
+                  [140, "Полдня отдыха"],
+                ].map(([cost, title]) => (
+                  <button
+                    key={title}
+                    className="secondary-btn"
+                    onClick={() =>
+                      setData((prev) => {
+                        const value = Number(cost);
+                        if (prev.xp.points < value) return prev;
+                        return { ...prev, xp: { ...prev.xp, points: prev.xp.points - value, spent: prev.xp.spent + value } };
+                      })
+                    }
+                  >
+                    {title} - {cost} XP
+                  </button>
+                ))}
+              </div>
+
+              <p className="mt-4 text-sm text-black/60">Потрачено за все время: {data.xp.spent} XP</p>
+            </motion.section>
+          )}
+        </AnimatePresence>
+      </main>
+
+      <AnimatePresence>
+        {paymentWindow && (
+          <motion.div className="payment-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="payment-window" initial={{ y: 16, opacity: 0, scale: 0.98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 12, opacity: 0 }}>
+              <p className="label">СБП перевод</p>
+              <p className="payment-amount">{paymentWindow.amount.toLocaleString("ru-RU")} ₽</p>
+              <p className="text-sm text-black/70">Переведи по номеру {OZON_PHONE} (OZON Банк).</p>
+              <p className="mt-2 text-sm text-black/70">Окно подтверждения: {String(paymentMinutes).padStart(2, "0")}:{String(paymentSeconds).padStart(2, "0")}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button className="primary-btn" disabled={paymentMs <= 0} onClick={confirmPayment}>Оплатил</button>
+                <button className="secondary-btn" onClick={() => setPaymentWindow(null)}>Отмена</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
